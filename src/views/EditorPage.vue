@@ -41,7 +41,9 @@ const editingText = ref('')
 const subtitleListContainer = ref<HTMLElement | null>(null)
 const subtitleItemRefs: Record<number, HTMLElement | null> = {}
 const isUserEditing = ref(false) // 标记是否是用户在编辑
+const isUserSelectingEntry = ref(false) // 标记用户是否在手动选择字幕
 let autoSaveTimer: ReturnType<typeof setTimeout> | null = null // 用于记录防抖计时器
+let userSelectionTimer: ReturnType<typeof setTimeout> | null = null // 用于记录用户选择的计时器
 
 // 计算属性
 const hasContent = computed(() => subtitleStore.entries.length > 0)
@@ -213,7 +215,7 @@ const handleTextInput = () => {
 
 // 监听音频播放进度，自动更新当前字幕
 watch(() => audioStore.playerState.currentTime, (currentTime) => {
-  if (hasAudio.value) {
+  if (hasAudio.value && !isUserSelectingEntry.value) {
     const entry = subtitleStore.getCurrentEntryByTime(currentTime)
     if (entry && selectedEntryId.value !== entry.id) {
       selectedEntryId.value = entry.id
@@ -354,6 +356,16 @@ const saveCurrentEntry = async () => {
 // 选择字幕
 const selectEntry = (id: number) => {
   selectedEntryId.value = id
+
+  // 标记用户正在选择字幕，300ms 内音频 watch 不会自动更新选择
+  isUserSelectingEntry.value = true
+  if (userSelectionTimer) {
+    clearTimeout(userSelectionTimer)
+  }
+  userSelectionTimer = setTimeout(() => {
+    isUserSelectingEntry.value = false
+    userSelectionTimer = null
+  }, 300)
 
   // 如果加载了音频，跳转音频到该字幕的开始时间
   if (hasAudio.value) {
