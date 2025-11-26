@@ -54,10 +54,8 @@ const openSRTFile = async () => {
       ElMessage.success('SRT 文件加载成功')
       isLoading.value = false
 
-      // 如果音频已加载，直接进入编辑器
-      if (audioStore.currentAudio) {
-        router.push('/editor')
-      }
+      // 加载成功后直接进入编辑器
+      router.push('/editor')
     }
   } catch (error) {
     isLoading.value = false
@@ -79,20 +77,28 @@ const openAudioFile = async () => {
 
     if (selected && typeof selected === 'string') {
       isLoading.value = true
-      // 创建音频文件对象
-      const audioFile: AudioFile = {
-        name: selected.split('/').pop() || 'audio',
-        path: selected,
-        duration: 0,
-        format: selected.split('.').pop() || 'mp3',
-      }
-      await audioStore.loadAudio(audioFile)
-      ElMessage.success('音频文件加载成功')
-      isLoading.value = false
+      try {
+        // 创建音频文件对象
+        const fileName = selected.split('/').pop() || 'audio'
+        const fileExtension = selected.split('.').pop()?.toLowerCase() || 'mp3'
 
-      // 如果字幕已加载，直接进入编辑器
-      if (subtitleStore.entries.length > 0) {
-        router.push('/editor')
+        const audioFile: AudioFile = {
+          name: fileName,
+          path: selected,
+          duration: 0,
+          format: fileExtension,
+        }
+        await audioStore.loadAudio(audioFile)
+        ElMessage.success('音频文件加载成功')
+        isLoading.value = false
+
+        // 如果字幕已加载，直接进入编辑器
+        if (subtitleStore.entries.length > 0) {
+          router.push('/editor')
+        }
+      } catch (error) {
+        isLoading.value = false
+        ElMessage.error(`加载失败: ${error}`)
       }
     }
   } catch (error) {

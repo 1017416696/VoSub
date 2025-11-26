@@ -11,6 +11,7 @@ pub struct TimeStamp {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SubtitleEntry {
     pub id: u32,
     pub start_time: TimeStamp,

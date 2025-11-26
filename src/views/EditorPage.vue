@@ -1,10 +1,13 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { open } from '@tauri-apps/plugin-dialog'
+import { invoke } from '@tauri-apps/api/core'
 import { useSubtitleStore } from '@/stores/subtitle'
 import { useAudioStore } from '@/stores/audio'
 import { useConfigStore } from '@/stores/config'
+import type { SRTFile, AudioFile } from '@/types/subtitle'
 
 const router = useRouter()
 const subtitleStore = useSubtitleStore()
@@ -15,6 +18,7 @@ const configStore = useConfigStore()
 const searchText = ref('')
 const showSearchPanel = ref(false)
 const selectedEntryId = ref<number | null>(null)
+const editingText = ref('')
 
 // 计算属性
 const hasContent = computed(() => subtitleStore.entries.length > 0)
@@ -22,45 +26,100 @@ const hasAudio = computed(() => audioStore.currentAudio !== null)
 const canUndo = computed(() => subtitleStore.canUndo)
 const canRedo = computed(() => subtitleStore.canRedo)
 
-// 键盘快捷键处理
-const handleKeydown = (e: KeyboardEvent) => {
-  const shortcuts = configStore.keyboardShortcuts
-  const key = `${e.ctrlKey ? 'Ctrl+' : ''}${e.shiftKey ? 'Shift+' : ''}${e.altKey ? 'Alt+' : ''}${e.key}`
+// 当前选中的字幕
+const currentEntry = computed(() => {
+  if (!selectedEntryId.value) return null
+  return subtitleStore.entries.find((e) => e.id === selectedEntryId.value) || null
+})
 
-  // 保存
-  if (shortcuts.save === key) {
-    e.preventDefault()
-    handleSave()
+// 监听选中字幕变化，更新编辑文本
+watch(currentEntry, (entry) => {
+  if (entry) {
+    editingText.value = entry.text
   }
-  // 撤销
-  else if (shortcuts.undo === key) {
-    e.preventDefault()
-    subtitleStore.undo()
+})
+
+// 初始化时选中第一条字幕
+onMounted(() => {
+  if (subtitleStore.entries.length > 0) {
+    selectedEntryId.value = subtitleStore.entries[0]?.id ?? null
   }
-  // 重做
-  else if (shortcuts.redo === key) {
-    e.preventDefault()
-    subtitleStore.redo()
+})
+
+// 打开 SRT 文件
+const handleOpenFile = async () => {
+  try {
+    const selected = await open({
+      multiple: false,
+      filters: [
+        {
+          name: 'SRT 字幕文件',
+          extensions: ['srt'],
+        },
+      ],
+    })
+
+    if (selected) {
+      const srtFile = await invoke<SRTFile>('read_srt', { filePath: selected })
+      await subtitleStore.loadSRTFile(srtFile)
+      ElMessage.success('SRT 文件加载成功')
+
+      // 选中第一条字幕
+      if (subtitleStore.entries.length > 0) {
+        selectedEntryId.value = subtitleStore.entries[0]?.id ?? null
+      }
+    }
+  } catch (error) {
+    ElMessage.error(`加载失败: ${error}`)
   }
-  // 播放/暂停
-  else if (shortcuts.playPause === key) {
-    e.preventDefault()
-    audioStore.togglePlay()
+}
+
+// 打开音频文件
+const handleOpenAudio = async () => {
+  try {
+    const selected = await open({
+      multiple: false,
+      filters: [
+        {
+          name: '音频文件',
+          extensions: ['mp3', 'wav', 'ogg', 'flac', 'm4a', 'aac'],
+        },
+      ],
+    })
+
+    if (selected && typeof selected === 'string') {
+      const fileName = selected.split('/').pop() || 'audio'
+      const fileExtension = selected.split('.').pop()?.toLowerCase() || 'mp3'
+
+      const audioFile: AudioFile = {
+        name: fileName,
+        path: selected,
+        duration: 0,
+        format: fileExtension,
+      }
+      await audioStore.loadAudio(audioFile)
+      ElMessage.success('音频文件加载成功')
+    }
+  } catch (error) {
+    ElMessage.error(`加载失败: ${error}`)
   }
-  // 查找
-  else if (shortcuts.find === key) {
-    e.preventDefault()
-    showSearchPanel.value = !showSearchPanel.value
-  }
-  // 新增字幕
-  else if (shortcuts.addEntry === key) {
-    e.preventDefault()
-    handleAddEntry()
-  }
-  // 删除字幕
-  else if (shortcuts.deleteEntry === key && selectedEntryId.value !== null) {
-    e.preventDefault()
-    handleDeleteEntry(selectedEntryId.value)
+}
+
+// 删除音频文件
+const handleRemoveAudio = async () => {
+  if (!hasAudio) return
+
+  try {
+    await ElMessageBox.confirm('确定要删除当前加载的音频文件吗？', '确认', {
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+      type: 'warning',
+    })
+
+    audioStore.unloadAudio()
+    ElMessage.success('已删除音频文件')
+  } catch {
+    // 用户取消
   }
 }
 
@@ -79,14 +138,37 @@ const handleSave = async () => {
   }
 }
 
-// 添加字幕条目
+// 保存当前字幕编辑
+const saveCurrentEntry = () => {
+  if (!currentEntry.value) return
+
+  if (editingText.value !== currentEntry.value.text) {
+    subtitleStore.updateEntryText(currentEntry.value.id, editingText.value)
+    ElMessage.success('已保存')
+  }
+}
+
+// 选择字幕
+const selectEntry = (id: number) => {
+  selectedEntryId.value = id
+}
+
+// 添加字幕
 const handleAddEntry = () => {
   subtitleStore.addEntry()
   ElMessage.success('已添加新字幕')
+
+  // 选中新添加的字幕
+  const newEntry = subtitleStore.entries[subtitleStore.entries.length - 1]
+  if (newEntry) {
+    selectedEntryId.value = newEntry.id
+  }
 }
 
-// 删除字幕条目
-const handleDeleteEntry = async (id: number) => {
+// 删除字幕
+const handleDeleteEntry = async () => {
+  if (!currentEntry.value) return
+
   try {
     await ElMessageBox.confirm('确定要删除这条字幕吗？', '确认删除', {
       confirmButtonText: '删除',
@@ -94,12 +176,33 @@ const handleDeleteEntry = async (id: number) => {
       type: 'warning',
     })
 
-    subtitleStore.deleteEntry(id)
+    const currentId = currentEntry.value.id
+    const currentIndex = subtitleStore.entries.findIndex((e) => e.id === currentId)
+
+    subtitleStore.deleteEntry(currentId)
     ElMessage.success('已删除字幕')
-    selectedEntryId.value = null
+
+    // 选中下一条或上一条字幕
+    if (subtitleStore.entries.length > 0) {
+      const nextEntry = subtitleStore.entries[currentIndex] || subtitleStore.entries[currentIndex - 1]
+      if (nextEntry) {
+        selectedEntryId.value = nextEntry.id
+      }
+    } else {
+      selectedEntryId.value = null
+    }
   } catch {
     // 用户取消
   }
+}
+
+// 移除 HTML 标签
+const handleRemoveHTML = () => {
+  subtitleStore.removeHTMLTags()
+  if (currentEntry.value) {
+    editingText.value = currentEntry.value.text
+  }
+  ElMessage.success('已移除所有 HTML 标签')
 }
 
 // 返回欢迎页
@@ -119,25 +222,22 @@ const goBack = async () => {
   router.push('/')
 }
 
-// 搜索
-const handleSearch = () => {
-  if (!searchText.value.trim()) {
-    ElMessage.warning('请输入搜索内容')
-    return
-  }
+// 键盘快捷键
+const handleKeydown = (e: KeyboardEvent) => {
+  const shortcuts = configStore.keyboardShortcuts
+  const key = `${e.ctrlKey ? 'Ctrl+' : ''}${e.key}`
 
-  const results = subtitleStore.search(searchText.value)
-  ElMessage.info(`找到 ${results.length} 条结果`)
+  if (shortcuts.save === key) {
+    e.preventDefault()
+    handleSave()
+  } else if (shortcuts.playPause === key.toLowerCase()) {
+    e.preventDefault()
+    audioStore.togglePlay()
+  }
 }
 
-// 生命周期
 onMounted(() => {
   window.addEventListener('keydown', handleKeydown)
-
-  // 如果没有内容，提示用户加载文件
-  if (!hasContent.value) {
-    ElMessage.info('请先加载 SRT 文件')
-  }
 })
 
 onUnmounted(() => {
@@ -150,219 +250,220 @@ onUnmounted(() => {
     <!-- 顶部工具栏 -->
     <div class="toolbar">
       <div class="toolbar-left">
-        <el-button :icon="'Back'" @click="goBack">返回</el-button>
-        <el-divider direction="vertical" />
-        <el-button :icon="'FolderOpened'" type="primary">打开文件</el-button>
-        <el-button
-          :icon="'Document'"
-          :disabled="!hasContent"
-          @click="handleSave"
-        >
-          保存
-        </el-button>
-      </div>
-
-      <div class="toolbar-center">
+        <span class="app-title">SRT 编辑工具</span>
         <span v-if="subtitleStore.currentFilePath" class="file-name">
           {{ subtitleStore.currentFilePath.split('/').pop() }}
         </span>
-        <span v-else class="text-gray-400">未加载文件</span>
       </div>
 
       <div class="toolbar-right">
-        <el-button
-          :icon="'RefreshLeft'"
-          :disabled="!canUndo"
-          @click="subtitleStore.undo()"
-          title="撤销 (Ctrl+Z)"
-        />
-        <el-button
-          :icon="'RefreshRight'"
-          :disabled="!canRedo"
-          @click="subtitleStore.redo()"
-          title="重做 (Ctrl+Y)"
-        />
-        <el-divider direction="vertical" />
-        <el-button
-          :icon="'Search'"
-          @click="showSearchPanel = !showSearchPanel"
-          title="查找 (Ctrl+F)"
-        />
+        <el-button @click="handleOpenFile">打开文件</el-button>
+        <el-button>导出</el-button>
+        <el-button type="primary" :disabled="!hasContent" @click="handleSave">
+          保存
+        </el-button>
       </div>
     </div>
 
     <!-- 主内容区 -->
     <div class="content-area">
       <!-- 左侧：字幕列表 -->
-      <div class="subtitle-panel">
-        <div class="panel-header">
-          <h3 class="panel-title">字幕列表</h3>
-          <el-button
-            size="small"
-            :icon="'Plus'"
-            type="primary"
-            @click="handleAddEntry"
-          >
-            添加
-          </el-button>
-        </div>
-
-        <!-- 搜索框 -->
-        <div v-if="showSearchPanel" class="search-panel">
+      <div class="subtitle-list-panel">
+        <!-- 搜索和添加 -->
+        <div class="list-header">
           <el-input
             v-model="searchText"
-            placeholder="搜索字幕内容..."
-            :prefix-icon="'Search'"
+            placeholder="搜索字幕..."
+            size="small"
             clearable
-            @keyup.enter="handleSearch"
           >
-            <template #append>
-              <el-button :icon="'Search'" @click="handleSearch" />
+            <template #prefix>
+              <span class="i-mdi-magnify"></span>
             </template>
           </el-input>
+          <el-button
+            type="primary"
+            size="small"
+            circle
+            class="ml-2"
+            @click="handleAddEntry"
+          >
+            <span class="i-mdi-plus"></span>
+          </el-button>
         </div>
 
         <!-- 字幕列表 -->
         <div class="subtitle-list">
           <div
-            v-if="!hasContent"
-            class="empty-state"
-          >
-            <i class="i-mdi-file-document-outline text-6xl text-gray-300 mb-4"></i>
-            <p class="text-gray-500">暂无字幕数据</p>
-            <el-button type="primary" class="mt-4" @click="goBack">
-              加载文件
-            </el-button>
-          </div>
-
-          <div
             v-for="entry in subtitleStore.entries"
-            v-else
             :key="entry.id"
             class="subtitle-item"
-            :class="{
-              'is-selected': selectedEntryId === entry.id,
-              'has-conflict': entry.hasConflict,
-            }"
-            @click="selectedEntryId = entry.id"
+            :class="{ 'is-selected': selectedEntryId === entry.id }"
+            @click="selectEntry(entry.id)"
           >
             <div class="item-header">
-              <span class="item-number">#{{ entry.id }}</span>
+              <span class="item-number">{{ entry.id }}</span>
               <span class="item-time">
-                {{ subtitleStore.formatTimeStamp(entry.startTime) }}
-                →
-                {{ subtitleStore.formatTimeStamp(entry.endTime) }}
+                {{ subtitleStore.formatTimeStamp(entry.startTime).slice(0, 8) }}
+                -
+                {{ subtitleStore.formatTimeStamp(entry.endTime).slice(0, 8) }}
               </span>
             </div>
             <div class="item-text">{{ entry.text }}</div>
-            <div class="item-actions">
-              <el-button
-                size="small"
-                :icon="'Edit'"
-                text
-                @click.stop="entry.isEditing = true"
-              />
-              <el-button
-                size="small"
-                :icon="'Delete'"
-                text
-                type="danger"
-                @click.stop="handleDeleteEntry(entry.id)"
-              />
-            </div>
+          </div>
+
+          <!-- 空状态 -->
+          <div v-if="!hasContent" class="empty-state">
+            <p class="text-gray-400">暂无字幕数据</p>
+            <el-button type="text" @click="goBack">返回加载文件</el-button>
           </div>
         </div>
 
         <!-- 底部统计 -->
-        <div class="panel-footer">
-          <span class="text-sm text-gray-500">
-            共 {{ subtitleStore.entries.length }} 条字幕
-          </span>
+        <div class="list-footer">
+          <span>{{ subtitleStore.entries.length }}/{{ subtitleStore.entries.length }} 字幕</span>
         </div>
       </div>
 
-      <!-- 右侧：音频播放器和时间轴 -->
-      <div class="player-panel">
-        <div class="panel-header">
-          <h3 class="panel-title">音频播放器</h3>
-        </div>
-
-        <div v-if="!hasAudio" class="empty-state">
-          <i class="i-mdi-music-note-outline text-6xl text-gray-300 mb-4"></i>
-          <p class="text-gray-500">暂未加载音频</p>
-          <p class="text-sm text-gray-400 mt-2">您可以在没有音频的情况下编辑字幕</p>
-        </div>
-
-        <div v-else class="audio-player">
-          <!-- 音频信息 -->
-          <div class="audio-info">
-            <p class="audio-name">{{ audioStore.currentAudio?.name }}</p>
-            <p class="audio-duration text-sm text-gray-500">
-              时长: {{ audioStore.formatTime(audioStore.playerState.duration) }}
-            </p>
+      <!-- 右侧：编辑区域 -->
+      <div class="edit-panel">
+        <!-- 音频控制区 -->
+        <div class="audio-section">
+          <div v-if="!hasAudio" class="audio-placeholder">
+            <span class="text-gray-500">未加载音频</span>
+            <el-button size="small" @click="handleOpenAudio">加载音频</el-button>
           </div>
 
-          <!-- 播放控制 -->
-          <div class="player-controls">
-            <el-button
-              :icon="audioStore.playerState.isPlaying ? 'VideoPause' : 'VideoPlay'"
-              circle
-              size="large"
-              type="primary"
-              @click="audioStore.togglePlay()"
-            />
-            <el-button :icon="'RefreshLeft'" circle @click="audioStore.seek(0)" />
-            <div class="volume-control">
-              <i class="i-mdi-volume-high"></i>
-              <el-slider
-                v-model="audioStore.playerState.volume"
-                :max="1"
-                :step="0.01"
-                :show-tooltip="false"
-                class="ml-2"
-                style="width: 100px"
-                @input="(val: number) => audioStore.setVolume(val)"
+          <div v-else class="audio-controls">
+            <div class="audio-header">
+              <span class="audio-name">{{ audioStore.currentAudio?.name }}</span>
+              <el-button text size="small" type="danger" @click="handleRemoveAudio">删除</el-button>
+            </div>
+
+            <div class="audio-player">
+              <el-button
+                circle
+                type="primary"
+                size="large"
+                @click="audioStore.togglePlay()"
+                class="play-button"
+              >
+                {{ audioStore.playerState.isPlaying ? '⏸' : '▶' }}
+              </el-button>
+              <span class="current-time">{{ audioStore.formatTime(audioStore.playerState.currentTime) }}</span>
+              <div class="progress-slider">
+                <el-slider
+                  v-model="audioStore.playerState.currentTime"
+                  :max="audioStore.playerState.duration"
+                  :step="0.1"
+                  :show-tooltip="false"
+                  @input="(val: number) => audioStore.seek(val)"
+                />
+              </div>
+              <span class="duration-time">{{ audioStore.formatTime(audioStore.playerState.duration) }}</span>
+            </div>
+
+            <div class="audio-controls-footer">
+              <div class="volume-section">
+                <div class="control-label">音量</div>
+                <div class="volume-control">
+                  <el-slider
+                    v-model="audioStore.playerState.volume"
+                    :max="1"
+                    :step="0.01"
+                    :show-tooltip="false"
+                    class="volume-slider"
+                    @input="(val: number) => audioStore.setVolume(val)"
+                  />
+                  <span class="volume-percentage">{{ Math.round(audioStore.playerState.volume * 100) }}%</span>
+                </div>
+              </div>
+
+              <div class="playback-rate-section">
+                <div class="control-label">速度</div>
+                <div class="speed-buttons">
+                  <el-button
+                    v-for="rate in [0.5, 1, 1.5, 2]"
+                    :key="rate"
+                    :type="audioStore.playerState.playbackRate === rate ? 'primary' : 'default'"
+                    size="small"
+                    @click="audioStore.setPlaybackRate(rate)"
+                  >
+                    {{ rate }}x
+                  </el-button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 字幕编辑区 -->
+        <div v-if="currentEntry" class="subtitle-edit-section">
+          <div class="edit-header">
+            <h3 class="edit-title">字幕 #{{ currentEntry.id }}</h3>
+          </div>
+
+          <!-- 时间编辑 -->
+          <div class="time-edit-row">
+            <div class="time-field">
+              <label>开始</label>
+              <el-input
+                :model-value="subtitleStore.formatTimeStamp(currentEntry.startTime)"
+                size="small"
+                readonly
+              />
+            </div>
+
+            <div class="time-arrow">→</div>
+
+            <div class="time-field">
+              <label>结束</label>
+              <el-input
+                :model-value="subtitleStore.formatTimeStamp(currentEntry.endTime)"
+                size="small"
+                readonly
+              />
+            </div>
+
+            <div class="time-field">
+              <label>时长</label>
+              <el-input
+                :model-value="`00:${String(Math.floor((subtitleStore.formatTimeStamp(currentEntry.endTime).slice(6, 8) as any) - (subtitleStore.formatTimeStamp(currentEntry.startTime).slice(6, 8) as any))).padStart(2, '0')},000`"
+                size="small"
+                readonly
               />
             </div>
           </div>
 
-          <!-- 进度条 -->
-          <div class="progress-bar">
-            <span class="time-label">
-              {{ audioStore.formatTime(audioStore.playerState.currentTime) }}
-            </span>
-            <el-slider
-              :model-value="audioStore.playerState.currentTime"
-              :max="audioStore.playerState.duration"
-              :step="0.1"
-              :show-tooltip="false"
-              @change="(val: number) => audioStore.seek(val)"
+          <!-- 文本编辑 -->
+          <div class="text-edit-section">
+            <label class="text-label">字幕文本</label>
+            <el-input
+              v-model="editingText"
+              type="textarea"
+              :rows="6"
+              placeholder="支持拖动时间调整时间，点击时间精确编辑"
             />
-            <span class="time-label">
-              {{ audioStore.formatTime(audioStore.playerState.duration) }}
-            </span>
+            <div class="text-meta">
+              <span>{{ editingText.length }} 字</span>
+            </div>
           </div>
 
-          <!-- 播放速度 -->
-          <div class="playback-rate">
-            <span class="text-sm text-gray-600 mr-2">播放速度:</span>
-            <el-radio-group
-              v-model="audioStore.playerState.playbackRate"
-              size="small"
-              @change="(val: number) => audioStore.setPlaybackRate(val)"
-            >
-              <el-radio-button :value="0.5">0.5x</el-radio-button>
-              <el-radio-button :value="0.75">0.75x</el-radio-button>
-              <el-radio-button :value="1">1x</el-radio-button>
-              <el-radio-button :value="1.25">1.25x</el-radio-button>
-              <el-radio-button :value="1.5">1.5x</el-radio-button>
-            </el-radio-group>
+          <!-- 保存按钮 -->
+          <div class="edit-actions">
+            <el-button type="primary" @click="saveCurrentEntry">保存</el-button>
           </div>
 
-          <!-- 时间轴可视化区域（占位） -->
-          <div class="timeline-placeholder">
-            <p class="text-gray-400 text-sm">时间轴可视化（待实现）</p>
+          <!-- 底部操作 -->
+          <div class="bottom-actions">
+            <el-button text @click="handleRemoveHTML">移除HTML</el-button>
+            <el-button text type="danger" @click="handleDeleteEntry">删除字幕</el-button>
           </div>
+        </div>
+
+        <!-- 无选中状态 -->
+        <div v-else class="no-selection">
+          <p class="text-gray-400">请从左侧选择一条字幕进行编辑</p>
         </div>
       </div>
     </div>
@@ -383,78 +484,56 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0.75rem 1rem;
+  padding: 0.75rem 1.5rem;
   background: white;
   border-bottom: 1px solid #e5e7eb;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
-.toolbar-left,
-.toolbar-right {
+.toolbar-left {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-}
-
-.toolbar-center {
-  flex: 1;
-  text-align: center;
-  font-weight: 500;
-}
-
-.file-name {
-  color: #333;
-}
-
-/* 内容区 */
-.content-area {
-  flex: 1;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
   gap: 1rem;
-  padding: 1rem;
-  overflow: hidden;
 }
 
-/* 面板 */
-.subtitle-panel,
-.player-panel {
-  background: white;
-  border-radius: 0.5rem;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.panel-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 1rem;
-  border-bottom: 1px solid #e5e7eb;
-}
-
-.panel-title {
+.app-title {
   font-size: 1.1rem;
   font-weight: 600;
   color: #333;
 }
 
-.panel-footer {
-  padding: 0.75rem 1rem;
-  border-top: 1px solid #e5e7eb;
-  background-color: #f9fafb;
+.file-name {
+  color: #666;
+  font-size: 0.9rem;
 }
 
-/* 搜索面板 */
-.search-panel {
-  padding: 0.75rem 1rem;
-  background-color: #f9fafb;
+.toolbar-right {
+  display: flex;
+  gap: 0.5rem;
+}
+
+/* 主内容区 */
+.content-area {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+/* 左侧字幕列表 */
+.subtitle-list-panel {
+  width: 450px;
+  background: white;
+  border-right: 1px solid #e5e7eb;
+  display: flex;
+  flex-direction: column;
+}
+
+.list-header {
+  padding: 1rem;
   border-bottom: 1px solid #e5e7eb;
+  display: flex;
+  align-items: center;
 }
 
-/* 字幕列表 */
 .subtitle-list {
   flex: 1;
   overflow-y: auto;
@@ -469,7 +548,6 @@ onUnmounted(() => {
   border-radius: 0.375rem;
   cursor: pointer;
   transition: all 0.2s;
-  position: relative;
 }
 
 .subtitle-item:hover {
@@ -478,13 +556,8 @@ onUnmounted(() => {
 }
 
 .subtitle-item.is-selected {
-  background: #eef2ff;
-  border-color: #818cf8;
-}
-
-.subtitle-item.has-conflict {
-  border-color: #fca5a5;
-  background: #fef2f2;
+  background: #eff6ff;
+  border-color: #3b82f6;
 }
 
 .item-header {
@@ -508,63 +581,154 @@ onUnmounted(() => {
 
 .item-text {
   color: #333;
+  font-size: 0.875rem;
   line-height: 1.5;
-  margin-bottom: 0.5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 }
 
-.item-actions {
-  display: flex;
-  gap: 0.25rem;
-  opacity: 0;
-  transition: opacity 0.2s;
+.list-footer {
+  padding: 0.75rem 1rem;
+  border-top: 1px solid #e5e7eb;
+  background: #f9fafb;
+  text-align: center;
+  font-size: 0.875rem;
+  color: #6b7280;
 }
 
-.subtitle-item:hover .item-actions {
-  opacity: 1;
-}
-
-/* 空状态 */
 .empty-state {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   height: 100%;
-  padding: 2rem;
+  gap: 1rem;
 }
 
-/* 音频播放器 */
-.audio-player {
-  padding: 1.5rem;
+/* 右侧编辑区 */
+.edit-panel {
+  flex: 1;
+  background: white;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 1.5rem;
 }
 
-.audio-info {
-  text-align: center;
+.audio-section {
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.audio-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem;
+  background: #f9fafb;
+  border-radius: 0.5rem;
+}
+
+.audio-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.audio-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 
 .audio-name {
-  font-weight: 600;
+  font-size: 0.95rem;
+  font-weight: 500;
   color: #333;
-  margin-bottom: 0.25rem;
 }
 
-.player-controls {
+.audio-player {
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 1rem;
+  gap: 0.75rem;
+}
+
+.play-button {
+  flex-shrink: 0;
+  font-size: 1.2rem;
+}
+
+.current-time,
+.duration-time {
+  font-size: 0.8rem;
+  color: #666;
+  font-family: monospace;
+  min-width: 35px;
+  text-align: center;
+}
+
+.progress-slider {
+  flex: 1;
+  min-width: 0;
+}
+
+.audio-controls-footer {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr;
+  gap: 1.5rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid #e5e7eb;
+}
+
+.volume-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.playback-rate-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.control-label {
+  font-size: 0.9rem;
+  color: #333;
+  font-weight: 500;
 }
 
 .volume-control {
   display: flex;
   align-items: center;
-  margin-left: 1rem;
+  gap: 0.75rem;
 }
 
-.progress-bar {
+.volume-slider {
+  flex: 1;
+  min-width: 0;
+}
+
+.volume-percentage {
+  font-size: 0.85rem;
+  color: #999;
+  min-width: 35px;
+  text-align: right;
+}
+
+.speed-buttons {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.timeline-section {
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.timeline-bar {
   display: flex;
   align-items: center;
   gap: 1rem;
@@ -575,21 +739,96 @@ onUnmounted(() => {
   color: #6b7280;
   font-family: monospace;
   min-width: 50px;
+  text-align: center;
 }
 
-.playback-rate {
+.timeline-progress {
+  flex: 1;
+  height: 4px;
+  background: #e5e7eb;
+  border-radius: 2px;
+  position: relative;
+}
+
+.progress-bar-bg {
+  height: 100%;
+  background: #3b82f6;
+  border-radius: 2px;
+  width: 0%;
+}
+
+.subtitle-edit-section {
+  padding: 1.5rem;
+  flex: 1;
+}
+
+.edit-header {
+  margin-bottom: 1.5rem;
+}
+
+.edit-title {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #333;
+}
+
+.time-edit-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.time-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  flex: 1;
+}
+
+.time-field label {
+  font-size: 0.875rem;
+  color: #6b7280;
+}
+
+.time-arrow {
+  padding-bottom: 0.5rem;
+  color: #9ca3af;
+}
+
+.text-edit-section {
+  margin-bottom: 1.5rem;
+}
+
+.text-label {
+  display: block;
+  font-size: 0.875rem;
+  color: #6b7280;
+  margin-bottom: 0.5rem;
+}
+
+.text-meta {
+  margin-top: 0.5rem;
+  text-align: right;
+  font-size: 0.75rem;
+  color: #9ca3af;
+}
+
+.edit-actions {
+  margin-bottom: 2rem;
+}
+
+.bottom-actions {
+  display: flex;
+  gap: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid #e5e7eb;
+}
+
+.no-selection {
+  flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
-}
-
-.timeline-placeholder {
-  height: 200px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: #f9fafb;
-  border: 2px dashed #e5e7eb;
-  border-radius: 0.375rem;
 }
 </style>

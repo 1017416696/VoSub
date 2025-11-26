@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { AudioFile, PlayerState } from '@/types/subtitle'
 import { Howl } from 'howler'
+import { invoke } from '@tauri-apps/api/core'
 
 export const useAudioStore = defineStore('audio', () => {
   // 状态
@@ -32,21 +33,48 @@ export const useAudioStore = defineStore('audio', () => {
 
     audioFile.value = file
 
-    return new Promise<void>((resolve, reject) => {
+    console.log('Loading audio from:', file.path)
+
+    return new Promise<void>(async (resolve, reject) => {
       try {
+        // 调用 Tauri 后端读取文件为 base64，避免路径编码问题
+        const fileBase64 = await invoke<string>('read_audio_file', { filePath: file.path })
+
+        // 将 base64 转换为 Blob
+        const binaryString = atob(fileBase64)
+        const bytes = new Uint8Array(binaryString.length)
+        for (let i = 0; i < binaryString.length; i++) {
+          bytes[i] = binaryString.charCodeAt(i)
+        }
+        const blob = new Blob([bytes], { type: `audio/${file.format}` })
+
+        // 创建 Object URL
+        const audioUrl = URL.createObjectURL(blob)
+
+        console.log('Created Object URL for audio file')
+        console.log('File format:', file.format)
+
         howl.value = new Howl({
-          src: [file.path],
+          src: [audioUrl],
           html5: true,
+          format: [file.format],
           volume: playerState.value.volume,
           rate: playerState.value.playbackRate,
+          preload: true,
           onload: () => {
+            console.log('Audio loaded successfully')
             if (howl.value) {
               playerState.value.duration = howl.value.duration()
             }
             resolve()
           },
           onloaderror: (_id, error) => {
-            reject(new Error(`Failed to load audio: ${error}`))
+            console.error('Audio load error:', error)
+            console.error('File path:', file.path)
+            console.error('File format:', file.format)
+            // 清理 Object URL
+            URL.revokeObjectURL(audioUrl)
+            reject(new Error(`Failed to load audio: ${error}. Path: ${file.path}`))
           },
           onplay: () => {
             playerState.value.isPlaying = true
@@ -65,7 +93,8 @@ export const useAudioStore = defineStore('audio', () => {
           },
         })
       } catch (error) {
-        reject(error)
+        console.error('Failed to read file:', error)
+        reject(new Error(`Failed to read audio file: ${error}`))
       }
     })
   }
@@ -146,8 +175,8 @@ export const useAudioStore = defineStore('audio', () => {
     }
   }
 
-  // 清理
-  const cleanup = () => {
+  // 卸载音频文件
+  const unloadAudio = () => {
     if (progressInterval) {
       clearInterval(progressInterval)
       progressInterval = null
@@ -166,6 +195,11 @@ export const useAudioStore = defineStore('audio', () => {
       volume: 1,
       playbackRate: 1,
     }
+  }
+
+  // 清理
+  const cleanup = () => {
+    unloadAudio()
   }
 
   // 格式化时间为字符串
@@ -188,6 +222,7 @@ export const useAudioStore = defineStore('audio', () => {
 
     // 方法
     loadAudio,
+    unloadAudio,
     togglePlay,
     play,
     pause,
