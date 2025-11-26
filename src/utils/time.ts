@@ -39,7 +39,7 @@ export function timeStampToString(time: TimeStamp): string {
  */
 export function parseTimeString(timeStr: string): TimeStamp {
   const match = timeStr.match(/(\d{2}):(\d{2}):(\d{2}),(\d{3})/)
-  if (!match) {
+  if (!match || !match[1] || !match[2] || !match[3] || !match[4]) {
     throw new Error(`Invalid time format: ${timeStr}`)
   }
 

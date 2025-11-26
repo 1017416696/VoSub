@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "@tauri-apps/api": "^2.9.0",
+    "@tauri-apps/plugin-dialog": "^2.4.2",
     "@tauri-apps/plugin-shell": "^2.3.3",
     "@types/howler": "^2.2.12",
     "@vue/devtools": "^8.0.3",
@@ -25,7 +26,8 @@
     "element-plus": "^2.11.8",
     "howler": "^2.2.4",
     "pinia": "^3.0.3",
-    "vue": "^3.5.22"
+    "vue": "^3.5.22",
+    "vue-router": "^4.6.3"
   },
   "devDependencies": {
     "@egoist/tailwindcss-icons": "^1.9.0",

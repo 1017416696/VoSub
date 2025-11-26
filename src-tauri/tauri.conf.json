@@ -12,9 +12,9 @@
   "app": {
     "windows": [
       {
-        "title": "tauri-app",
-        "width": 800,
-        "height": 600
+        "title": "SRT 字幕编辑器",
+        "width": 1200,
+        "height": 800
       }
     ],
     "security": {
@@ -24,7 +24,8 @@
         "font-src": "'self",
         "img-src": "'self' asset: http://asset.localhost blob: data:",
         "style-src": "'unsafe-inline' 'self'"
-      }
+      },
+      "capabilities": ["default"]
     }
   },
   "bundle": {

@@ -60,9 +60,27 @@ export const useConfigStore = defineStore('config', () => {
   // 初始化时加载配置
   loadConfig()
 
+  // 创建快捷键映射对象
+  const keyboardShortcuts = computed(() => {
+    const shortcuts: Record<string, string> = {}
+    keyBindings.value.forEach((binding) => {
+      shortcuts[binding.action.replace(/-([a-z])/g, (g) => g[1]?.toUpperCase() || g)] = binding.key
+    })
+    return {
+      save: 'Ctrl+s',
+      undo: 'Ctrl+z',
+      redo: 'Ctrl+Shift+z',
+      playPause: ' ',
+      find: 'Ctrl+f',
+      addEntry: 'Ctrl+n',
+      deleteEntry: 'Delete',
+    }
+  })
+
   return {
     config,
     keyBindings,
+    keyboardShortcuts,
     updateConfig,
     saveConfig,
     loadConfig,

@@ -168,12 +168,23 @@ export const useAudioStore = defineStore('audio', () => {
     }
   }
 
+  // 格式化时间为字符串
+  const formatTime = (seconds: number): string => {
+    const mins = Math.floor(seconds / 60)
+    const secs = Math.floor(seconds % 60)
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
+  }
+
+  // 当前音频文件的引用（为了兼容性）
+  const currentAudio = computed(() => audioFile.value)
+
   return {
     // 状态
     audioFile,
     playerState,
     isLoaded,
     progress,
+    currentAudio,
 
     // 方法
     loadAudio,
@@ -187,5 +198,6 @@ export const useAudioStore = defineStore('audio', () => {
     decreaseVolume,
     setPlaybackRate,
     cleanup,
+    formatTime,
   }
 })

@@ -5,8 +5,9 @@ import type {
   SRTFile,
   TimeConflict,
   HistoryAction,
-  HistoryActionType,
+  TimeStamp,
 } from '@/types/subtitle'
+import { HistoryActionType } from '@/types/subtitle'
 import { timeStampToMs, getDuration } from '@/utils/time'
 
 export const useSubtitleStore = defineStore('subtitle', () => {
@@ -56,6 +57,8 @@ export const useSubtitleStore = defineStore('subtitle', () => {
       const current = sortedEntries[i]
       const next = sortedEntries[i + 1]
 
+      if (!current || !next) continue
+
       const currentEnd = timeStampToMs(current.endTime)
       const nextStart = timeStampToMs(next.startTime)
 
@@ -83,7 +86,7 @@ export const useSubtitleStore = defineStore('subtitle', () => {
   const loadSRTFile = (file: SRTFile) => {
     srtFile.value = file
     entries.value = file.entries
-    currentEntryId.value = entries.value.length > 0 ? entries.value[0].id : null
+    currentEntryId.value = entries.value.length > 0 ? (entries.value[0]?.id ?? null) : null
     history.value = []
     historyIndex.value = -1
     detectTimeConflicts()
@@ -290,14 +293,35 @@ export const useSubtitleStore = defineStore('subtitle', () => {
     searchResults.value = []
     currentSearchIndex.value = 0
 
-    if (!query) return
+    if (!query) return []
 
     entries.value.forEach((entry) => {
       if (entry.text.toLowerCase().includes(query.toLowerCase())) {
         searchResults.value.push(entry.id)
       }
     })
+
+    return searchResults.value
   }
+
+  // 格式化时间戳为字符串
+  const formatTimeStamp = (time: TimeStamp): string => {
+    const pad = (num: number, size: number) => num.toString().padStart(size, '0')
+    return `${pad(time.hours, 2)}:${pad(time.minutes, 2)}:${pad(time.seconds, 2)},${pad(time.milliseconds, 3)}`
+  }
+
+  // 保存到文件
+  const saveToFile = async () => {
+    if (!srtFile.value) {
+      throw new Error('No file loaded')
+    }
+
+    // TODO: Call Tauri command to save file
+    historyIndex.value = -1
+  }
+
+  // 获取当前文件路径
+  const currentFilePath = computed(() => srtFile.value?.path || null)
 
   // 跳转到下一个搜索结果
   const nextSearchResult = () => {
@@ -305,7 +329,7 @@ export const useSubtitleStore = defineStore('subtitle', () => {
 
     currentSearchIndex.value =
       (currentSearchIndex.value + 1) % searchResults.value.length
-    currentEntryId.value = searchResults.value[currentSearchIndex.value]
+    currentEntryId.value = searchResults.value[currentSearchIndex.value] ?? null
   }
 
   // 跳转到上一个搜索结果
@@ -315,7 +339,7 @@ export const useSubtitleStore = defineStore('subtitle', () => {
     currentSearchIndex.value =
       (currentSearchIndex.value - 1 + searchResults.value.length) %
       searchResults.value.length
-    currentEntryId.value = searchResults.value[currentSearchIndex.value]
+    currentEntryId.value = searchResults.value[currentSearchIndex.value] ?? null
   }
 
   return {
@@ -336,6 +360,7 @@ export const useSubtitleStore = defineStore('subtitle', () => {
     hasUnsavedChanges,
     canUndo,
     canRedo,
+    currentFilePath,
 
     // 方法
     loadSRTFile,
@@ -352,5 +377,7 @@ export const useSubtitleStore = defineStore('subtitle', () => {
     search,
     nextSearchResult,
     prevSearchResult,
+    formatTimeStamp,
+    saveToFile,
   }
 })
