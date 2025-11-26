@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { open } from '@tauri-apps/plugin-dialog'
@@ -7,6 +7,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { useSubtitleStore } from '@/stores/subtitle'
 import { useAudioStore } from '@/stores/audio'
 import { useConfigStore } from '@/stores/config'
+import { timeStampToMs } from '@/utils/time'
 import type { SRTFile, AudioFile } from '@/types/subtitle'
 
 const router = useRouter()
@@ -19,6 +20,8 @@ const searchText = ref('')
 const showSearchPanel = ref(false)
 const selectedEntryId = ref<number | null>(null)
 const editingText = ref('')
+const subtitleListContainer = ref<HTMLElement | null>(null)
+const subtitleItemRefs: Record<number, HTMLElement | null> = {}
 
 // 计算属性
 const hasContent = computed(() => subtitleStore.entries.length > 0)
@@ -36,6 +39,25 @@ const currentEntry = computed(() => {
 watch(currentEntry, (entry) => {
   if (entry) {
     editingText.value = entry.text
+  }
+})
+
+// 监听音频播放进度，自动更新当前字幕
+watch(() => audioStore.playerState.currentTime, (currentTime) => {
+  if (hasAudio.value) {
+    const entry = subtitleStore.getCurrentEntryByTime(currentTime)
+    if (entry && selectedEntryId.value !== entry.id) {
+      selectedEntryId.value = entry.id
+
+      // 自动滚动字幕列表，使当前字幕保持在可见范围内
+      nextTick(() => {
+        const itemElement = subtitleItemRefs[entry.id]
+        const containerElement = subtitleListContainer.value
+        if (itemElement && containerElement) {
+          itemElement.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+        }
+      })
+    }
   }
 })
 
@@ -151,6 +173,17 @@ const saveCurrentEntry = () => {
 // 选择字幕
 const selectEntry = (id: number) => {
   selectedEntryId.value = id
+
+  // 如果加载了音频，跳转音频到该字幕的开始时间
+  if (hasAudio.value) {
+    const entry = subtitleStore.entries.find((e) => e.id === id)
+    if (entry) {
+      // 将时间戳转换为毫秒，再转换为秒数
+      const timeMs = timeStampToMs(entry.startTime)
+      const timeSeconds = timeMs / 1000
+      audioStore.seek(timeSeconds)
+    }
+  }
 }
 
 // 添加字幕
@@ -293,10 +326,11 @@ onUnmounted(() => {
         </div>
 
         <!-- 字幕列表 -->
-        <div class="subtitle-list">
+        <div class="subtitle-list" ref="subtitleListContainer">
           <div
             v-for="entry in subtitleStore.entries"
             :key="entry.id"
+            :ref="(el) => { if (el) subtitleItemRefs[entry.id] = el as HTMLElement }"
             class="subtitle-item"
             :class="{ 'is-selected': selectedEntryId === entry.id }"
             @click="selectEntry(entry.id)"
