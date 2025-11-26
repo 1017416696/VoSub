@@ -34,7 +34,8 @@ const configStore = useConfigStore()
 
 // UI 状态
 const searchText = ref('')
-const showSearchPanel = ref(false)
+const replaceText = ref('')
+const showReplace = ref(false)
 const selectedEntryId = ref<number | null>(null)
 const editingText = ref('')
 const subtitleListContainer = ref<HTMLElement | null>(null)
@@ -89,6 +90,70 @@ const filteredEntries = computed(() => {
     subtitleStore.searchResults.includes(entry.id)
   )
 })
+
+// 执行替换全部
+const replaceAll = async () => {
+  if (!searchText.value) {
+    ElMessage.warning('请输入要查找的文本')
+    return
+  }
+
+  try {
+    let modifiedCount = 0
+
+    subtitleStore.entries.forEach((entry) => {
+      const newText = entry.text.replaceAll(searchText.value, replaceText.value)
+
+      if (newText !== entry.text) {
+        subtitleStore.updateEntryText(entry.id, newText)
+        modifiedCount++
+      }
+    })
+
+    // 保存文件
+    if (modifiedCount > 0) {
+      await subtitleStore.saveToFile()
+      ElMessage.success(`成功修改 ${modifiedCount} 条字幕`)
+    } else {
+      ElMessage.info('未找到匹配的文本')
+    }
+  } catch (error) {
+    ElMessage.error(`替换失败: ${error}`)
+  }
+}
+
+// 替换当前搜索结果
+const replaceOne = async () => {
+  if (!currentEntry.value || !subtitleStore.searchResults.includes(currentEntry.value.id)) {
+    return
+  }
+
+  const entry = currentEntry.value
+  let newText = entry.text
+
+  try {
+    // 只支持普通字符串替换
+    newText = newText.replaceAll(searchText.value, replaceText.value)
+
+    if (newText !== entry.text) {
+      subtitleStore.updateEntryText(entry.id, newText)
+      await subtitleStore.saveToFile()
+
+      // 替换后自动跳到下一个搜索结果
+      const currentIndex = subtitleStore.searchResults.indexOf(entry.id)
+      if (currentIndex !== -1 && currentIndex < subtitleStore.searchResults.length - 1) {
+        // 还有下一个，自动跳到下一个
+        const nextId = subtitleStore.searchResults[currentIndex + 1]
+        selectedEntryId.value = nextId
+      } else if (currentIndex === subtitleStore.searchResults.length - 1) {
+        // 已经是最后一个，提示
+        ElMessage.success('已替换，没有更多结果了')
+      }
+    }
+  } catch (error) {
+    ElMessage.error(`替换失败: ${error}`)
+  }
+}
 
 // 自动保存函数
 const autoSaveCurrentEntry = async () => {
@@ -440,27 +505,72 @@ onUnmounted(() => {
     <div class="content-area">
       <!-- 左侧：字幕列表 -->
       <div class="subtitle-list-panel">
-        <!-- 搜索和添加 -->
+        <!-- 搜索和替换框 -->
+        <div class="search-replace-container">
+          <!-- 搜索框 -->
+          <div class="search-row">
+            <button
+              class="toggle-btn"
+              @click="showReplace = !showReplace"
+              :title="showReplace ? '隐藏替换' : '显示替换'"
+            >
+              {{ showReplace ? '▼' : '▶' }}
+            </button>
+            <el-input
+              v-model="searchText"
+              placeholder="搜索字幕"
+              clearable
+              class="search-input"
+              size="small"
+            />
+            <span v-if="searchText && subtitleStore.searchResults.length > 0" class="match-count">
+              {{ subtitleStore.searchResults.length }}
+            </span>
+          </div>
+
+          <!-- 替换框 -->
+          <div v-if="showReplace" class="replace-row">
+            <div class="replace-spacer"></div>
+            <el-input
+              v-model="replaceText"
+              placeholder="替换为..."
+              clearable
+              class="replace-input"
+              size="small"
+            />
+            <button
+              class="replace-btn"
+              @click="replaceOne"
+              :disabled="!searchText || subtitleStore.searchResults.length === 0"
+              title="替换当前项，然后跳到下一个"
+            >
+              替换
+            </button>
+            <button
+              class="replace-btn replace-all-btn"
+              @click="replaceAll"
+              :disabled="!searchText"
+              title="全部替换"
+            >
+              全部替换
+            </button>
+          </div>
+        </div>
+
+        <!-- 列表头部 -->
         <div class="list-header">
-          <el-input
-            v-model="searchText"
-            placeholder="搜索字幕..."
-            clearable
-            class="search-input"
-          >
-            <template #prefix>
-              <span class="i-mdi-magnify"></span>
-            </template>
-          </el-input>
+          <span class="search-info" v-if="searchText && subtitleStore.searchResults.length > 0">
+            {{ filteredEntries.length }}/{{ subtitleStore.entries.length }}
+          </span>
           <el-button
             type="primary"
             circle
             size="small"
-            class="add-button"
+            class="add-btn"
             @click="handleAddEntry"
-            :title="'添加新字幕'"
+            title="添加新字幕"
           >
-            <span class="i-mdi-plus"></span>
+            +
           </el-button>
         </div>
 
@@ -471,7 +581,9 @@ onUnmounted(() => {
             :key="entry.id"
             :ref="(el) => { if (el) subtitleItemRefs[entry.id] = el as HTMLElement }"
             class="subtitle-item"
-            :class="{ 'is-selected': selectedEntryId === entry.id }"
+            :class="{
+              'is-selected': selectedEntryId === entry.id
+            }"
             @click="selectEntry(entry.id)"
           >
             <div class="item-header">
@@ -647,6 +759,7 @@ onUnmounted(() => {
         </div>
       </div>
     </div>
+
   </div>
 </template>
 
@@ -707,54 +820,188 @@ onUnmounted(() => {
   flex-direction: column;
 }
 
-.list-header {
+/* 搜索和替换框 */
+.search-replace-container {
   padding: 0.5rem;
   border-bottom: 1px solid #e5e7eb;
+  background: white;
+}
+
+.search-row {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.search-row:last-of-type {
+  margin-bottom: 0;
+}
+
+.toggle-btn {
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: #606266;
+  cursor: pointer;
+  font-size: 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-radius: 0.25rem;
+  transition: all 0.2s;
+}
+
+.toggle-btn:hover {
+  color: #409eff;
+  background: #f0f9ff;
 }
 
 .search-input {
   flex: 1;
+  min-width: 0;
 }
 
 .search-input :deep(.el-input__wrapper) {
-  padding: 0.5rem 0.75rem;
-  background-color: #f9fafb;
-  border: 1px solid #e5e7eb;
-  border-radius: 0.375rem;
-  transition: all 0.2s;
-  height: 2.25rem;
-  display: flex;
-  align-items: center;
+  padding: 0.4rem 0.6rem;
+  background: white;
+  border: 1px solid #dcdfe6;
+  border-radius: 0.3rem;
+  height: 2rem;
 }
 
 .search-input :deep(.el-input__wrapper:hover) {
-  background: #f3f4f6;
-  border-color: #d1d5db;
+  border-color: #b3d8ff;
+  background: white;
 }
 
 .search-input :deep(.el-input__wrapper.is-focus) {
-  background: #f9fafb;
-  border-color: #3b82f6;
-  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
+  border-color: #409eff;
+  box-shadow: 0 0 0 2px rgba(64, 158, 255, 0.2);
 }
 
 .search-input :deep(.el-input__input) {
   font-size: 0.875rem;
 }
 
-.search-input :deep(.el-input__prefix) {
-  color: #9ca3af;
-}
-
-.add-button {
+.match-count {
+  padding: 0.25rem 0.5rem;
+  background: #f0f0f0;
+  border-radius: 0.25rem;
+  font-size: 0.75rem;
+  color: #666;
+  white-space: nowrap;
   flex-shrink: 0;
 }
 
-.add-button :deep(span) {
-  font-size: 1rem;
+.replace-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.replace-spacer {
+  width: 2rem;
+  flex-shrink: 0;
+}
+
+.replace-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.replace-input :deep(.el-input__wrapper) {
+  padding: 0.4rem 0.6rem;
+  background: white;
+  border: 1px solid #dcdfe6;
+  border-radius: 0.3rem;
+  height: 2rem;
+}
+
+.replace-input :deep(.el-input__wrapper:hover) {
+  border-color: #b3d8ff;
+  background: white;
+}
+
+.replace-input :deep(.el-input__wrapper.is-focus) {
+  border-color: #409eff;
+  box-shadow: 0 0 0 2px rgba(64, 158, 255, 0.2);
+}
+
+.replace-input :deep(.el-input__input) {
+  font-size: 0.875rem;
+}
+
+.replace-btn {
+  padding: 0.4rem 0.8rem;
+  background: white;
+  border: 1px solid #dcdfe6;
+  border-radius: 0.3rem;
+  color: #606266;
+  cursor: pointer;
+  font-size: 0.875rem;
+  transition: all 0.2s;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.replace-btn:hover:not(:disabled) {
+  border-color: #409eff;
+  color: #409eff;
+}
+
+.replace-btn:disabled {
+  color: #ccc;
+  cursor: not-allowed;
+}
+
+.replace-all-btn:not(:disabled) {
+  background: #409eff;
+  border-color: #409eff;
+  color: white;
+}
+
+.replace-all-btn:hover:not(:disabled) {
+  background: #66b1ff;
+  border-color: #66b1ff;
+}
+
+.regex-label {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.875rem;
+  color: #606266;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.regex-label input {
+  cursor: pointer;
+}
+
+/* 列表头部 */
+.list-header {
+  padding: 0.5rem;
+  border-bottom: 1px solid #e5e7eb;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #fafafa;
+}
+
+.search-info {
+  font-size: 0.8rem;
+  color: #909399;
+}
+
+.add-btn {
+  flex-shrink: 0;
 }
 
 .subtitle-list {
@@ -1054,4 +1301,5 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
 }
+
 </style>
