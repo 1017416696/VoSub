@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { open } from '@tauri-apps/plugin-dialog'
@@ -11,6 +11,23 @@ import type { SRTFile, AudioFile } from '@/types/subtitle'
 const router = useRouter()
 const subtitleStore = useSubtitleStore()
 const audioStore = useAudioStore()
+
+// 检测操作系统
+const isMac = computed(() => {
+  return typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.platform)
+})
+
+// 根据操作系统返回快捷键字符串
+const getShortcutKey = (shortcut: string) => {
+  if (isMac.value) {
+    // 在 macOS 上转换为符号格式，并添加空格
+    return shortcut
+      .replace(/Ctrl\+/g, '⌘ ')
+      .replace(/Shift\+/g, '⇧ ')
+      .replace(/\+/g, ' ')
+  }
+  return shortcut
+}
 
 const isDragging = ref(false)
 const isLoading = ref(false)
@@ -201,7 +218,7 @@ const skipToEditor = () => {
       <!-- 快捷键说明（可选） -->
       <div class="shortcuts-hint">
         <p class="text-xs text-gray-400">
-          快捷键：<kbd>Ctrl+O</kbd> 打开文件 · <kbd>Ctrl+S</kbd> 保存 · <kbd>Space</kbd> 播放/暂停
+          快捷键：<kbd>{{ getShortcutKey('Ctrl+O') }}</kbd> 打开文件 · <kbd>{{ getShortcutKey('Ctrl+S') }}</kbd> 保存 · <kbd>Space</kbd> 播放/暂停
         </p>
       </div>
 

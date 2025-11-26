@@ -2,7 +2,7 @@ mod srt_parser;
 
 use srt_parser::{read_srt_file, write_srt_file, SRTFile, SubtitleEntry};
 use std::fs;
-use tauri::menu::{MenuBuilder, SubmenuBuilder};
+use tauri::menu::{MenuBuilder, SubmenuBuilder, MenuItem};
 use tauri::{Emitter, Manager};
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
@@ -85,27 +85,57 @@ pub fn run() {
                     .text("quit", "Quit SRT Editor")
                     .build()?;
 
-                // 创建 File 菜单
+                // 创建 File 菜单（macOS 使用 Cmd）
                 let file_menu = SubmenuBuilder::new(app, "File")
-                    .text("open", "Open")
-                    .text("save", "Save")
+                    .text("open", "Open\t⌘ O")
+                    .text("save", "Save\t⌘ S")
                     .separator()
                     .text("close", "Close Window")
                     .build()?;
 
-                // 创建 Edit 菜单
+                // 创建 Edit 菜单（macOS 使用 Cmd）
                 let edit_menu = SubmenuBuilder::new(app, "Edit")
-                    .text("undo", "Undo")
-                    .text("redo", "Redo")
+                    .text("undo", "Undo\t⌘ Z")
+                    .text("redo", "Redo\t⌘ ⇧ Z")
                     .separator()
-                    .text("cut", "Cut")
-                    .text("copy", "Copy")
-                    .text("paste", "Paste")
+                    .text("cut", "Cut\t⌘ X")
+                    .text("copy", "Copy\t⌘ C")
+                    .text("paste", "Paste\t⌘ V")
                     .build()?;
 
                 // 创建菜单：应用菜单 -> File -> Edit
                 let menu = MenuBuilder::new(app)
                     .item(&app_menu)
+                    .item(&file_menu)
+                    .item(&edit_menu)
+                    .build()?;
+
+                app.set_menu(menu)?;
+            }
+
+            // Windows 配置
+            #[cfg(target_os = "windows")]
+            {
+                // 创建 File 菜单（Windows 使用 Ctrl）
+                let file_menu = SubmenuBuilder::new(app, "File")
+                    .text("open", "Open\tCtrl+O")
+                    .text("save", "Save\tCtrl+S")
+                    .separator()
+                    .text("close", "Close Window")
+                    .build()?;
+
+                // 创建 Edit 菜单（Windows 使用 Ctrl）
+                let edit_menu = SubmenuBuilder::new(app, "Edit")
+                    .text("undo", "Undo\tCtrl+Z")
+                    .text("redo", "Redo\tCtrl+Shift+Z")
+                    .separator()
+                    .text("cut", "Cut\tCtrl+X")
+                    .text("copy", "Copy\tCtrl+C")
+                    .text("paste", "Paste\tCtrl+V")
+                    .build()?;
+
+                // 创建菜单：File -> Edit
+                let menu = MenuBuilder::new(app)
                     .item(&file_menu)
                     .item(&edit_menu)
                     .build()?;
