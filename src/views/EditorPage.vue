@@ -612,6 +612,14 @@ const handleKeydown = (e: KeyboardEvent) => {
   } else if (shortcuts.deleteEntry === pressedKey) {
     e.preventDefault()
     handleDeleteEntry()
+  } else if (hasAudio.value && (pressedKey === 'Cmd+=' || pressedKey === 'Cmd++' || pressedKey === 'Ctrl+=')) {
+    // macOS: Cmd+=, Windows/Linux: Ctrl+=
+    e.preventDefault()
+    handleZoomIn()
+  } else if (hasAudio.value && (pressedKey === 'Cmd+-' || pressedKey === 'Ctrl+-')) {
+    // macOS: Cmd+-, Windows/Linux: Ctrl+-
+    e.preventDefault()
+    handleZoomOut()
   }
 }
 </script>
