@@ -29,6 +29,8 @@ export const useAudioStore = defineStore('audio', () => {
 
   // 全局事件监听器（在模块级别设置，避免重复设置）
   let waveformProgressUnlisten: (() => void) | null = null
+  // 模拟进度递增定时器
+  let progressSimulationTimer: number | null = null
 
   // 加载音频文件
   const loadAudio = async (file: AudioFile) => {
@@ -41,6 +43,23 @@ export const useAudioStore = defineStore('audio', () => {
     isGeneratingWaveform.value = true
     waveformProgress.value = 0
     
+    // 跟踪真实进度
+    let lastRealProgress = 0
+    
+    // 启动模拟进度递增（当真实进度停滞时，前端自动平滑递增）
+    const startProgressSimulation = () => {
+      if (progressSimulationTimer) {
+        clearInterval(progressSimulationTimer)
+      }
+      progressSimulationTimer = window.setInterval(() => {
+        // 如果当前进度小于99%，且已经超过真实进度，则递增
+        if (waveformProgress.value < 99 && waveformProgress.value >= lastRealProgress) {
+          // 递增速度：每150ms递增1%，更平滑自然
+          waveformProgress.value = Math.min(99, waveformProgress.value + 1)
+        }
+      }, 150) // 每150ms递增1%
+    }
+    
     // 设置事件监听器
     try {
       if (waveformProgressUnlisten) {
@@ -50,8 +69,15 @@ export const useAudioStore = defineStore('audio', () => {
       
       waveformProgressUnlisten = await listen<number>('waveform-progress', (event) => {
         const progress = Math.round(event.payload * 100)
-        waveformProgress.value = progress
+        lastRealProgress = progress
+        // 只有当真实进度大于当前显示进度时才更新
+        if (progress > waveformProgress.value) {
+          waveformProgress.value = progress
+        }
       })
+      
+      // 启动模拟进度
+      startProgressSimulation()
     } catch (error) {
       console.error('Failed to set up waveform progress listener:', error)
     }
@@ -209,6 +235,12 @@ export const useAudioStore = defineStore('audio', () => {
       progressInterval = null
     }
 
+    // 清理模拟进度定时器
+    if (progressSimulationTimer) {
+      clearInterval(progressSimulationTimer)
+      progressSimulationTimer = null
+    }
+
     if (howl.value) {
       howl.value.unload()
       howl.value = null
@@ -270,8 +302,19 @@ export const useAudioStore = defineStore('audio', () => {
     } catch (error) {
       console.error('Waveform generation failed:', error)
     } finally {
-      isGeneratingWaveform.value = false
+      // 停止模拟进度定时器
+      if (progressSimulationTimer) {
+        clearInterval(progressSimulationTimer)
+        progressSimulationTimer = null
+      }
+      
+      // 先设置进度为100%
       waveformProgress.value = 100
+      
+      // 等待一小段时间让用户看到100%的进度，然后再关闭加载动画
+      await new Promise(resolve => setTimeout(resolve, 300))
+      
+      isGeneratingWaveform.value = false
       if (waveformProgressUnlisten) {
         waveformProgressUnlisten()
         waveformProgressUnlisten = null

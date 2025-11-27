@@ -1,5 +1,7 @@
 use std::fs::File;
 use std::path::Path;
+use std::thread;
+use std::time::Duration;
 use symphonia::core::audio::{AudioBufferRef, Signal};
 use symphonia::core::codecs::{DecoderOptions, CODEC_TYPE_NULL};
 use symphonia::core::formats::FormatOptions;
@@ -114,6 +116,8 @@ pub fn generate_waveform_with_progress(
     // Report progress: 80% - starting downsample
     if let Some(ref callback) = progress_callback {
         callback(0.8);
+        // 短暂延迟确保事件能被发送到前端
+        thread::sleep(Duration::from_millis(10));
     }
 
     // Downsample to target number of samples
@@ -122,6 +126,8 @@ pub fn generate_waveform_with_progress(
     // Report progress: 100% - complete
     if let Some(ref callback) = progress_callback {
         callback(1.0);
+        // 短暂延迟确保100%进度事件能被前端接收后再返回
+        thread::sleep(Duration::from_millis(50));
     }
 
     Ok(waveform)
@@ -218,6 +224,11 @@ fn downsample_and_normalize_with_progress(
 
     if total_samples <= target_samples {
         // If we have fewer samples than target, just normalize
+        // 报告进度：90%（快速处理阶段）
+        if let Some(ref callback) = progress_callback {
+            callback(0.9);
+            thread::sleep(Duration::from_millis(10));
+        }
         return samples.iter().map(|&s| s.abs()).collect();
     }
 
@@ -238,10 +249,19 @@ fn downsample_and_normalize_with_progress(
         waveform.push(peak);
         
         // Update progress (downsample phase: 80-100%)
+        // 每1000个元素更新一次（约每5%更新一次），确保有足够时间让事件传递到前端
         if let Some(ref callback) = progress_callback {
-            if i % 200 == 0 || i == target_samples - 1 {
-                let progress = 0.8 + (i as f32 / target_samples as f32) * 0.2;
-                callback(progress);
+            if i % 1000 == 0 || i == target_samples - 1 {
+                let current_progress = 0.8 + ((i + 1) as f32 / target_samples as f32) * 0.2;
+                // 确保最后一个元素时进度接近100%（但不等于100%，因为后面会设置为100%）
+                let progress_to_report = if i == target_samples - 1 {
+                    0.99 // 设置为99%，让主函数设置为100%
+                } else {
+                    current_progress.min(0.99) // 限制最大值为99%
+                };
+                callback(progress_to_report);
+                // 短暂延迟确保事件能被发送到前端
+                thread::sleep(Duration::from_millis(5));
             }
         }
     }
