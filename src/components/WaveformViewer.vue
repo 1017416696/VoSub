@@ -4,7 +4,7 @@
     <div class="timeline-container" ref="timelineContainerRef">
       <!-- 波形和字幕轨道 -->
       <div class="timeline-track-area" ref="trackAreaRef" @scroll="handleScroll">
-        <div class="timeline-content" :style="{ width: timelineWidth + 'px' }">
+        <div class="timeline-content" :style="{ width: timelineWidth + 'px' }" @click="handleTimelineClick">
           <!-- 时间刻度尺 -->
           <div class="time-ruler" :style="{ width: timelineWidth + 'px' }">
             <div
@@ -204,6 +204,34 @@ const scrollToTime = (time: number) => {
 // Handle scroll
 const handleScroll = () => {
   // 可以在这里添加滚动时的逻辑
+}
+
+// Handle timeline click to seek
+const handleTimelineClick = (event: MouseEvent) => {
+  // 忽略对字幕块的点击
+  if ((event.target as HTMLElement).closest('.subtitle-block')) {
+    return
+  }
+
+  if (!trackAreaRef.value) return
+
+  // 获取点击相对于 timeline-content 的位置
+  const timelineContent = trackAreaRef.value.querySelector('.timeline-content') as HTMLElement
+  if (!timelineContent) return
+
+  // 获取点击点相对于 timeline-content 的像素位置
+  const rect = timelineContent.getBoundingClientRect()
+  const trackRect = trackAreaRef.value.getBoundingClientRect()
+  const clickX = event.clientX - trackRect.left + trackAreaRef.value.scrollLeft
+
+  // 转换像素为时间
+  const time = pixelToTime(clickX)
+
+  // 确保时间在有效范围内
+  const clampedTime = Math.max(0, Math.min(time, props.duration))
+
+  // 发送 seek 事件
+  emit('seek', clampedTime)
 }
 
 // Subtitle dragging
