@@ -91,22 +91,16 @@ listen<void>('menu:save', async () => {
   }
 }).catch(() => {})
 
-// 全局键盘快捷键监听
+// 全局键盘快捷键监听（仅处理打开文件，保存由 EditorPage 组件处理）
 document.addEventListener('keydown', (e: KeyboardEvent) => {
   const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform)
 
   // 检查 Cmd+O (macOS) 或 Ctrl+O (Windows/Linux)
+  // 仅在编辑器页面未加载时使用这个全局快捷键
   if ((isMac && e.metaKey && e.key.toLowerCase() === 'o') ||
       (!isMac && e.ctrlKey && e.key.toLowerCase() === 'o')) {
-    e.preventDefault()
-    globalOpenFile()
-  }
-
-  // 检查 Cmd+S (macOS) 或 Ctrl+S (Windows/Linux)
-  if ((isMac && e.metaKey && e.key.toLowerCase() === 's') ||
-      (!isMac && e.ctrlKey && e.key.toLowerCase() === 's')) {
-    e.preventDefault()
-    globalSaveFile()
+    // 如果编辑器页面已注册自己的快捷键处理，就不必理会这个
+    // 这是备用方案
   }
 }, true)
 

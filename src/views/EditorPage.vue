@@ -45,6 +45,7 @@ const isUserEditing = ref(false) // 标记是否是用户在编辑
 const isUserSelectingEntry = ref(false) // 标记用户是否在手动选择字幕
 let autoSaveTimer: ReturnType<typeof setTimeout> | null = null // 用于记录防抖计时器
 let userSelectionTimer: ReturnType<typeof setTimeout> | null = null // 用于记录用户选择的计时器
+let isSaving = false // 防止保存重复触发
 
 // 计算属性
 const hasContent = computed(() => subtitleStore.entries.length > 0)
@@ -249,13 +250,9 @@ onMounted(async () => {
       await handleSave()
     }
 
-    // 同时还是添加本地监听器（以防万一）
+    // 注册全局菜单处理函数（供 main.ts 中的全局监听器调用）
     const unlistenOpenFile = await listen<void>('menu:open-file', async () => {
       await handleOpenFile()
-    })
-
-    const unlistenSave = await listen<void>('menu:save', async () => {
-      await handleSave()
     })
 
     // 添加键盘快捷键监听（添加到 document 而不是 window，确保捕获所有键盘事件）
@@ -264,7 +261,6 @@ onMounted(async () => {
     // 在组件卸载时清理所有监听器
     onBeforeUnmount(() => {
       unlistenOpenFile()
-      unlistenSave()
       // 清除全局处理函数
       ;(window as any).__handleMenuOpenFile = null
       ;(window as any).__handleMenuSave = null
@@ -354,16 +350,25 @@ const handleRemoveAudio = async () => {
 
 // 保存文件
 const handleSave = async () => {
+  // 防止重复保存
+  if (isSaving) return
+
   if (!subtitleStore.currentFilePath) {
     ElMessage.warning('没有可保存的文件')
     return
   }
 
+  isSaving = true
   try {
     await subtitleStore.saveToFile()
     ElMessage.success('保存成功')
   } catch (error) {
     ElMessage.error(`保存失败: ${error}`)
+  } finally {
+    // 100ms 后允许再次保存
+    setTimeout(() => {
+      isSaving = false
+    }, 100)
   }
 }
 
