@@ -462,6 +462,29 @@ const handleSubtitleUpdate = (id: number, startTime: TimeStamp, endTime: TimeSta
   }
 }
 
+// 处理批量字幕时间更新
+const handleSubtitlesUpdate = (updates: Array<{ id: number; startTime: TimeStamp; endTime: TimeStamp }>) => {
+  console.log(`📝 Batch updating ${updates.length} subtitles from waveform`)
+
+  // 批量更新字幕时间
+  updates.forEach(({ id, startTime, endTime }) => {
+    subtitleStore.updateEntryTime(id, startTime, endTime)
+  })
+
+  // 自动保存
+  if (subtitleStore.currentFilePath) {
+    subtitleStore.saveToFile().catch((error) => {
+      // 保存失败，静默处理
+    })
+  }
+}
+
+// 处理字幕选择变化
+const handleSubtitlesSelect = (ids: number[]) => {
+  // 可以在这里处理选择变化，比如更新 UI
+  // 目前主要用于多选状态同步
+}
+
 // WaveformViewer ref
 const waveformViewerRef = ref<InstanceType<typeof WaveformViewer> | null>(null)
 
@@ -686,6 +709,8 @@ const handleKeydown = (e: KeyboardEvent) => {
         :waveform-progress="audioStore.waveformProgress"
         @seek="handleWaveformSeek"
         @update-subtitle="handleSubtitleUpdate"
+        @update-subtitles="handleSubtitlesUpdate"
+        @select-subtitles="handleSubtitlesSelect"
       />
     </div>
 

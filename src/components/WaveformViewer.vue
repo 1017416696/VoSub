@@ -37,14 +37,15 @@
           </div>
 
           <!-- 字幕轨道 -->
-          <div class="subtitle-track">
+          <div class="subtitle-track" @mousedown="handleTrackMouseDown">
             <div
               v-for="subtitle in subtitles"
               :key="subtitle.id"
               class="subtitle-block"
               :class="{
-                'is-dragging': draggingSubtitle?.id === subtitle.id,
-                'is-active': currentSubtitleId === subtitle.id
+                'is-dragging': draggingSubtitle?.id === subtitle.id || draggingSelectedSubtitles.some(s => s.id === subtitle.id),
+                'is-active': currentSubtitleId === subtitle.id,
+                'is-selected': selectedSubtitleIds.has(subtitle.id)
               }"
               :style="getSubtitleStyle(subtitle)"
               @mousedown="handleSubtitleMouseDown($event, subtitle)"
@@ -67,6 +68,18 @@
                 @mousedown.stop="handleResizeStart($event, subtitle, 'right')"
               ></div>
             </div>
+
+            <!-- 选择框 -->
+            <div
+              v-if="selectionBox && Math.abs(selectionBox.endX - selectionBox.startX) > 5"
+              class="selection-box"
+              :style="{
+                left: Math.min(selectionBox.startX, selectionBox.endX) + 'px',
+                top: '0px',
+                width: Math.abs(selectionBox.endX - selectionBox.startX) + 'px',
+                height: '80px'
+              }"
+            ></div>
           </div>
 
           <!-- 播放指针 -->
@@ -110,6 +123,8 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<{
   seek: [time: number]
   updateSubtitle: [id: number, startTime: TimeStamp, endTime: TimeStamp]
+  updateSubtitles: [updates: Array<{ id: number; startTime: TimeStamp; endTime: TimeStamp }>]
+  selectSubtitles: [ids: number[]]
 }>()
 
 // Refs
@@ -125,11 +140,18 @@ const zoomLevel = ref(1) // 缩放级别：1 = 1秒占用 100px
 const pixelsPerSecond = computed(() => 100 * zoomLevel.value)
 const timelineWidth = computed(() => props.duration * pixelsPerSecond.value)
 
+// Selection state
+const selectedSubtitleIds = ref<Set<number>>(new Set())
+const isSelecting = ref(false)
+const selectionBox = ref<{ startX: number; startY: number; endX: number; endY: number } | null>(null)
+
 // Dragging state
 const draggingSubtitle = ref<SubtitleEntry | null>(null)
+const draggingSelectedSubtitles = ref<SubtitleEntry[]>([]) // 批量拖拽时选中的字幕
 const resizingSubtitle = ref<{ subtitle: SubtitleEntry; side: 'left' | 'right' } | null>(null)
 const dragStartX = ref(0)
 const dragStartTime = ref(0)
+const dragStartTimes = ref<Map<number, number>>(new Map()) // 批量拖拽时每个字幕的起始时间
 const currentSubtitleId = ref<number | null>(null)
 
 // Helper: Time to pixel position
@@ -189,6 +211,10 @@ const getSubtitleStyle = (subtitle: SubtitleEntry) => {
   // 生成颜色
   const hue = (subtitle.id * 137.5) % 360
   const color = `hsl(${hue}, 70%, 65%)`
+  
+  // 如果被选中，使用更亮的颜色作为基础色
+  const isSelected = selectedSubtitleIds.value.has(subtitle.id)
+  const baseColor = isSelected ? `hsl(${hue}, 75%, 70%)` : color
 
   // 根据缩放级别动态调整最小宽度
   // 缩放越小，最小宽度也越小，避免字幕块过长挤占空间
@@ -197,7 +223,7 @@ const getSubtitleStyle = (subtitle: SubtitleEntry) => {
   return {
     left: left + 'px',
     width: Math.max(width, minWidth) + 'px',
-    backgroundColor: color
+    backgroundColor: baseColor
   }
 }
 
@@ -245,12 +271,19 @@ const handleScroll = () => {
 
 // Handle timeline click to seek
 const handleTimelineClick = (event: MouseEvent) => {
-  // 忽略对字幕块的点击
-  if ((event.target as HTMLElement).closest('.subtitle-block')) {
+  // 忽略对字幕块的点击和选择框
+  if ((event.target as HTMLElement).closest('.subtitle-block') || 
+      (event.target as HTMLElement).closest('.subtitle-track')) {
     return
   }
 
   if (!trackAreaRef.value) return
+
+  // 清除选择（如果点击空白区域）
+  if (!event.shiftKey) {
+    selectedSubtitleIds.value.clear()
+    emit('selectSubtitles', [])
+  }
 
   // 获取点击相对于 timeline-content 的位置
   const timelineContent = trackAreaRef.value.querySelector('.timeline-content') as HTMLElement
@@ -269,6 +302,191 @@ const handleTimelineClick = (event: MouseEvent) => {
 
   // 发送 seek 事件
   emit('seek', clampedTime)
+}
+
+// Handle track mouse down for selection box
+const handleTrackMouseDown = (event: MouseEvent) => {
+  // 如果点击在字幕块上，不处理（由字幕块的 mousedown 处理）
+  if ((event.target as HTMLElement).closest('.subtitle-block') ||
+      (event.target as HTMLElement).closest('.resize-handle')) {
+    return
+  }
+
+  // 记录初始位置，用于判断是否是拖拽
+  const initialX = event.clientX
+  const initialY = event.clientY
+  let hasMoved = false
+  const isAccumulateMode = event.ctrlKey || event.metaKey || event.altKey || event.shiftKey
+
+  // 立即初始化选择框，这样用户一开始拖拽就能看到
+  const trackRect = trackAreaRef.value?.getBoundingClientRect()
+  if (!trackAreaRef.value || !trackRect) return
+
+  // 获取字幕轨道的位置
+  const subtitleTrack = trackAreaRef.value.querySelector('.subtitle-track') as HTMLElement
+  if (!subtitleTrack) return
+  
+  const trackElementRect = subtitleTrack.getBoundingClientRect()
+  const startX = initialX - trackRect.left + trackAreaRef.value.scrollLeft
+  const startY = initialY - trackElementRect.top
+
+  // 立即创建选择框，但先设置为很小的尺寸
+  isSelecting.value = true
+  
+  // 如果不是累加模式，清除之前的选择
+  if (!isAccumulateMode) {
+    selectedSubtitleIds.value.clear()
+  }
+  
+  selectionBox.value = {
+    startX,
+    startY,
+    endX: startX,
+    endY: startY
+  }
+
+  const handleMove = (e: MouseEvent) => {
+    const deltaX = Math.abs(e.clientX - initialX)
+    const deltaY = Math.abs(e.clientY - initialY)
+    if (deltaX > 3 || deltaY > 3) {
+      hasMoved = true
+    }
+    
+    // 更新选择框位置
+    if (selectionBox.value && trackAreaRef.value) {
+      const currentTrackRect = trackAreaRef.value.getBoundingClientRect()
+      const endX = e.clientX - currentTrackRect.left + trackAreaRef.value.scrollLeft
+      
+      // 获取字幕轨道相对于 trackArea 的位置
+      const subtitleTrack = trackAreaRef.value.querySelector('.subtitle-track') as HTMLElement
+      if (subtitleTrack) {
+        const trackRect = subtitleTrack.getBoundingClientRect()
+        const containerRect = trackAreaRef.value.getBoundingClientRect()
+        const endY = e.clientY - trackRect.top
+        
+        selectionBox.value.endX = endX
+        selectionBox.value.endY = endY
+        
+        // 更新选中的字幕
+        const isAccumulate = e.ctrlKey || e.metaKey || e.altKey || e.shiftKey
+        updateSelectionFromBox(isAccumulate)
+      }
+    }
+  }
+
+  const handleUp = (e: MouseEvent) => {
+    document.removeEventListener('mousemove', handleMove)
+    document.removeEventListener('mouseup', handleUp)
+    
+    // 如果没有移动，只是点击，清除选择（除非按住 Shift/Ctrl 等）
+    if (!hasMoved && !isAccumulateMode) {
+      selectedSubtitleIds.value.clear()
+      emit('selectSubtitles', [])
+    }
+    
+    // 结束框选
+    isSelecting.value = false
+    
+    // 如果选择框太小，清除选择
+    if (selectionBox.value) {
+      const width = Math.abs(selectionBox.value.endX - selectionBox.value.startX)
+      const height = Math.abs(selectionBox.value.endY - selectionBox.value.startY)
+      
+      if (width < 10 && height < 10 && !isAccumulateMode) {
+        selectedSubtitleIds.value.clear()
+      }
+    }
+    
+    selectionBox.value = null
+    emit('selectSubtitles', Array.from(selectedSubtitleIds.value))
+  }
+
+  document.addEventListener('mousemove', handleMove)
+  document.addEventListener('mouseup', handleUp)
+  event.preventDefault()
+}
+
+// Handle selection box move (保留此函数以防其他地方调用)
+const handleSelectionMove = (event: MouseEvent) => {
+  if (!isSelecting.value || !selectionBox.value || !trackAreaRef.value) return
+
+  const trackRect = trackAreaRef.value.getBoundingClientRect()
+  const endX = event.clientX - trackRect.left + trackAreaRef.value.scrollLeft
+  const endY = event.clientY - trackRect.top
+
+  selectionBox.value.endX = endX
+  selectionBox.value.endY = endY
+
+  // 更新选中的字幕
+  // 如果按住 Ctrl/Cmd/Alt/Shift，累加选择；否则替换选择
+  const isAccumulateMode = event.ctrlKey || event.metaKey || event.altKey || event.shiftKey
+  updateSelectionFromBox(isAccumulateMode)
+}
+
+// Handle selection box end
+const handleSelectionEnd = (event?: MouseEvent) => {
+  isSelecting.value = false
+  
+  // 如果选择框太小（可能是误触），清除选择
+  if (selectionBox.value) {
+    const width = Math.abs(selectionBox.value.endX - selectionBox.value.startX)
+    const height = Math.abs(selectionBox.value.endY - selectionBox.value.startY)
+    
+    // 如果选择框太小（小于10px），可能是误触，清除选择（除非按住修饰键）
+    if (width < 10 && height < 10 && !(event?.ctrlKey || event?.metaKey || event?.altKey || event?.shiftKey)) {
+      selectedSubtitleIds.value.clear()
+    }
+  }
+  
+  selectionBox.value = null
+  document.removeEventListener('mousemove', handleSelectionMove)
+  document.removeEventListener('mouseup', handleSelectionEnd)
+  
+  emit('selectSubtitles', Array.from(selectedSubtitleIds.value))
+}
+
+// Update selection from selection box
+const updateSelectionFromBox = (accumulate: boolean = false) => {
+  if (!selectionBox.value || !trackAreaRef.value) return
+
+  const boxLeft = Math.min(selectionBox.value.startX, selectionBox.value.endX)
+  const boxRight = Math.max(selectionBox.value.startX, selectionBox.value.endX)
+  const boxTop = Math.min(selectionBox.value.startY, selectionBox.value.endY)
+  const boxBottom = Math.max(selectionBox.value.startY, selectionBox.value.endY)
+
+  // 临时存储当前框选范围内的字幕ID
+  const boxSelectedIds = new Set<number>()
+
+  // 检查每个字幕是否在选择框内
+  // 注意：选择框的坐标是相对于字幕轨道的，字幕块的位置也是相对于字幕轨道的
+  props.subtitles.forEach(subtitle => {
+    const start = timestampToSeconds(subtitle.startTime)
+    const end = timestampToSeconds(subtitle.endTime)
+    const left = timeToPixel(start)
+    const right = timeToPixel(end)
+    const top = 20 // 字幕块在轨道中的位置（top: 20px）
+    const bottom = top + 40 // 字幕块高度（height: 40px）
+
+    // 检查是否与选择框相交
+    // 只要字幕块与选择框有任何重叠，就选中它
+    if (right >= boxLeft && left <= boxRight && bottom >= boxTop && top <= boxBottom) {
+      boxSelectedIds.add(subtitle.id)
+    }
+  })
+
+  // 更新选择
+  if (accumulate) {
+    // 累加模式：添加框选范围内的字幕到现有选择
+    boxSelectedIds.forEach(id => {
+      selectedSubtitleIds.value.add(id)
+    })
+  } else {
+    // 替换模式：只保留框选范围内的字幕
+    selectedSubtitleIds.value.clear()
+    boxSelectedIds.forEach(id => {
+      selectedSubtitleIds.value.add(id)
+    })
+  }
 }
 
 // Handle wheel zoom (mouse wheel or trackpad)
@@ -322,9 +540,48 @@ const handleWheel = (event: WheelEvent) => {
 
 // Subtitle dragging
 const handleSubtitleMouseDown = (event: MouseEvent, subtitle: SubtitleEntry) => {
-  draggingSubtitle.value = subtitle
+  // 如果点击调整手柄，不处理（由 resize 处理）
+  if ((event.target as HTMLElement).closest('.resize-handle')) {
+    return
+  }
+
+  // 处理多选
+  if (event.shiftKey) {
+    // Shift+点击：切换选择状态
+    if (selectedSubtitleIds.value.has(subtitle.id)) {
+      selectedSubtitleIds.value.delete(subtitle.id)
+    } else {
+      selectedSubtitleIds.value.add(subtitle.id)
+    }
+    emit('selectSubtitles', Array.from(selectedSubtitleIds.value))
+    return
+  } else if (event.ctrlKey || event.metaKey) {
+    // Ctrl/Cmd+点击：添加到选择
+    selectedSubtitleIds.value.add(subtitle.id)
+    emit('selectSubtitles', Array.from(selectedSubtitleIds.value))
+    return
+  }
+
+  // 如果当前字幕已被选中，且还有其他选中项，则批量拖拽
+  const hasMultipleSelected = selectedSubtitleIds.value.size > 1 && selectedSubtitleIds.value.has(subtitle.id)
+  
+  if (hasMultipleSelected) {
+    // 批量拖拽：拖拽所有选中的字幕
+    draggingSelectedSubtitles.value = props.subtitles.filter(s => selectedSubtitleIds.value.has(s.id))
+    dragStartTimes.value = new Map()
+    draggingSelectedSubtitles.value.forEach(s => {
+      dragStartTimes.value.set(s.id, timestampToSeconds(s.startTime))
+    })
+  } else {
+    // 单个拖拽
+    selectedSubtitleIds.value.clear()
+    selectedSubtitleIds.value.add(subtitle.id)
+    emit('selectSubtitles', [subtitle.id])
+    draggingSubtitle.value = subtitle
+    dragStartTime.value = timestampToSeconds(subtitle.startTime)
+  }
+
   dragStartX.value = event.clientX
-  dragStartTime.value = timestampToSeconds(subtitle.startTime)
   currentSubtitleId.value = subtitle.id
 
   document.addEventListener('mousemove', handleSubtitleDrag)
@@ -333,23 +590,51 @@ const handleSubtitleMouseDown = (event: MouseEvent, subtitle: SubtitleEntry) => 
 }
 
 const handleSubtitleDrag = (event: MouseEvent) => {
-  if (!draggingSubtitle.value) return
-
   const deltaX = event.clientX - dragStartX.value
   const deltaTime = pixelToTime(deltaX)
-  const newStartTime = Math.max(0, dragStartTime.value + deltaTime)
 
-  const subtitle = draggingSubtitle.value
-  const duration = timestampToSeconds(subtitle.endTime) - timestampToSeconds(subtitle.startTime)
-  const newEndTime = Math.min(props.duration, newStartTime + duration)
+  // 批量拖拽
+  if (draggingSelectedSubtitles.value.length > 0) {
+    const updates: Array<{ id: number; startTime: TimeStamp; endTime: TimeStamp }> = []
+    
+    draggingSelectedSubtitles.value.forEach(subtitle => {
+      const originalStartTime = dragStartTimes.value.get(subtitle.id)
+      if (originalStartTime === undefined) return
 
-  if (newEndTime <= props.duration) {
-    emit('updateSubtitle', subtitle.id, secondsToTimestamp(newStartTime), secondsToTimestamp(newEndTime))
+      const newStartTime = Math.max(0, originalStartTime + deltaTime)
+      const duration = timestampToSeconds(subtitle.endTime) - timestampToSeconds(subtitle.startTime)
+      const newEndTime = Math.min(props.duration, newStartTime + duration)
+
+      if (newEndTime <= props.duration && newStartTime >= 0) {
+        updates.push({
+          id: subtitle.id,
+          startTime: secondsToTimestamp(newStartTime),
+          endTime: secondsToTimestamp(newEndTime)
+        })
+      }
+    })
+
+    if (updates.length > 0) {
+      emit('updateSubtitles', updates)
+    }
+  } 
+  // 单个拖拽
+  else if (draggingSubtitle.value) {
+    const newStartTime = Math.max(0, dragStartTime.value + deltaTime)
+    const subtitle = draggingSubtitle.value
+    const duration = timestampToSeconds(subtitle.endTime) - timestampToSeconds(subtitle.startTime)
+    const newEndTime = Math.min(props.duration, newStartTime + duration)
+
+    if (newEndTime <= props.duration) {
+      emit('updateSubtitle', subtitle.id, secondsToTimestamp(newStartTime), secondsToTimestamp(newEndTime))
+    }
   }
 }
 
 const handleSubtitleDragEnd = () => {
   draggingSubtitle.value = null
+  draggingSelectedSubtitles.value = []
+  dragStartTimes.value.clear()
   currentSubtitleId.value = null
   document.removeEventListener('mousemove', handleSubtitleDrag)
   document.removeEventListener('mouseup', handleSubtitleDragEnd)
@@ -539,6 +824,8 @@ onUnmounted(() => {
   document.removeEventListener('mouseup', handleSubtitleDragEnd)
   document.removeEventListener('mousemove', handleResize)
   document.removeEventListener('mouseup', handleResizeEnd)
+  document.removeEventListener('mousemove', handleSelectionMove)
+  document.removeEventListener('mouseup', handleSelectionEnd)
 })
 
 // Expose methods to parent component
@@ -741,6 +1028,11 @@ defineExpose({
   position: relative;
   background: #f8fafc;
   border-top: 1px solid #e2e8f0;
+  cursor: default;
+}
+
+.subtitle-track:active {
+  cursor: crosshair;
 }
 
 /* 字幕块 */
@@ -766,6 +1058,16 @@ defineExpose({
   border-color: #3b82f6;
   box-shadow: 0 2px 12px rgba(59, 130, 246, 0.4);
   z-index: 20;
+}
+
+.subtitle-block.is-selected {
+  outline: 3px solid #3b82f6 !important;
+  outline-offset: -1px;
+  z-index: 15;
+}
+
+.subtitle-block.is-selected:hover {
+  outline-color: #2563eb !important;
 }
 
 .subtitle-block.is-dragging {
@@ -867,5 +1169,15 @@ defineExpose({
 
 .timeline-track-area::-webkit-scrollbar-thumb:hover {
   background: #94a3b8;
+}
+
+/* 选择框 */
+.selection-box {
+  position: absolute;
+  border: 2px dashed #3b82f6;
+  background: rgba(59, 130, 246, 0.08);
+  pointer-events: none;
+  z-index: 5;
+  border-radius: 4px;
 }
 </style>
