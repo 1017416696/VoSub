@@ -190,11 +190,6 @@ pub fn run() {
                 // macOS 特定配置已完成
             }
 
-            #[cfg(debug_assertions)]
-            {
-                let window = tauri::Manager::get_webview_window(app, "main").unwrap();
-                window.open_devtools();
-            }
             Ok(())
         })
         .plugin(tauri_plugin_shell::init())
