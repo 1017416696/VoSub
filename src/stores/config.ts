@@ -80,6 +80,7 @@ export const useConfigStore = defineStore('config', () => {
       find: isApple ? 'Cmd+f' : 'Ctrl+f',
       addEntry: isApple ? 'Cmd+n' : 'Ctrl+n',
       deleteEntry: 'Delete',
+      copy: isApple ? 'Cmd+c' : 'Ctrl+c',
     }
   })
 

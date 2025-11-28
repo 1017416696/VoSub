@@ -841,6 +841,12 @@ const handleKeydown = (e: KeyboardEvent) => {
         searchInputRef.value?.focus()
       })
     }
+  } else if (shortcuts.copy === pressedKey) {
+    // Command+C 或 Ctrl+C：复制当前选中字幕
+    e.preventDefault()
+    if (currentEntry.value) {
+      copySubtitleText(currentEntry.value.id)
+    }
   } else if (shortcuts.playPause === pressedKey.toLowerCase()) {
     e.preventDefault()
     audioStore.togglePlay()
