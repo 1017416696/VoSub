@@ -1111,10 +1111,10 @@ const handleKeydown = (e: KeyboardEvent) => {
             {{ subtitleStore.currentFilePath ? subtitleStore.currentFilePath.split('/').pop()?.replace('.srt', '') : '豆包输入法' }}.srt
           </span>
           <span v-if="selectedEntryId" class="count-info">
-            {{ selectedEntryId }}/{{ subtitleStore.entries.length }} 字幕
+            {{ filteredEntries.findIndex(e => e.id === selectedEntryId) + 1 }}/{{ filteredEntries.length }} 字幕
           </span>
           <span v-else class="count-info">
-            0/{{ subtitleStore.entries.length }} 字幕
+            0/{{ filteredEntries.length }} 字幕
           </span>
         </div>
       </div>
