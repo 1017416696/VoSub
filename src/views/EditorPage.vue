@@ -625,6 +625,9 @@ const handleKeydown = (e: KeyboardEvent) => {
     target instanceof HTMLTextAreaElement ||
     target instanceof HTMLInputElement
 
+  // 检查是否在搜索框内
+  const isInSearchInput = target === searchInputRef.value?.$el?.querySelector('input')
+
   const shortcuts = configStore.keyboardShortcuts
   const pressedKey = buildKeyString(e)
 
@@ -640,10 +643,18 @@ const handleKeydown = (e: KeyboardEvent) => {
       // 如果在搜索输入框内按 Cmd+F/Ctrl+F，保持焦点不变
       e.preventDefault()
     } else if (e.key === 'Escape') {
-      // 在搜索输入框内按 ESC 时，清除搜索文本并失焦
+      // 在输入框内按 ESC 时，清除搜索文本并失焦（如果在搜索框）
       e.preventDefault()
-      searchText.value = ''
+      if (isInSearchInput) {
+        searchText.value = ''
+        searchInputRef.value?.blur()
+      }
+    } else if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && isInSearchInput) {
+      // 在搜索框内按上下箭头时，失焦并导航字幕列表
+      e.preventDefault()
       searchInputRef.value?.blur()
+      navigateSubtitleList(e.key === 'ArrowDown' ? 'down' : 'up')
+      return
     }
     // 不处理其他快捷键，允许正常输入（包括空格）
     return
