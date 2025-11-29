@@ -10,7 +10,7 @@ import { useConfigStore } from '@/stores/config'
 import { timeStampToMs } from '@/utils/time'
 import type { SRTFile, AudioFile, TimeStamp } from '@/types/subtitle'
 import WaveformViewer from '@/components/WaveformViewer.vue'
-import { DocumentCopy, VideoPlay, Delete } from '@element-plus/icons-vue'
+import { DocumentCopy, VideoPlay, Delete, PriceTag, Document } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 // Debounce helper function
@@ -41,6 +41,8 @@ const replaceText = ref('')
 const showReplace = ref(false)
 const selectedEntryId = ref<number | null>(null)
 const editingText = ref('')
+const editingStartTime = ref('')
+const editingEndTime = ref('')
 const subtitleListContainer = ref<HTMLElement | null>(null)
 const searchInputRef = ref<InstanceType<typeof HTMLInputElement> | null>(null)
 const textareaInputRef = ref<any>(null) // el-input 的 ref
@@ -63,11 +65,13 @@ const currentEntry = computed(() => {
   return subtitleStore.entries.find((e) => e.id === selectedEntryId.value) || null
 })
 
-// 监听选中字幕变化，更新编辑文本
+// 监听选中字幕变化，更新编辑文本和时间
 watch(currentEntry, (entry) => {
   if (entry) {
     isUserEditing.value = false // 标记为非用户编辑
     editingText.value = entry.text
+    editingStartTime.value = subtitleStore.formatTimeStamp(entry.startTime)
+    editingEndTime.value = subtitleStore.formatTimeStamp(entry.endTime)
   }
 })
 
@@ -568,6 +572,124 @@ const handleRemoveHTML = () => {
   }
 }
 
+// 处理时间输入变化
+const handleTimeChange = async (type: 'start' | 'end') => {
+  if (!currentEntry.value) return
+
+  try {
+    // 验证时间格式 (HH:MM:SS,mmm)
+    const timeRegex = /^(\d{2}):(\d{2}):(\d{2}),(\d{3})$/
+    const timeValue = type === 'start' ? editingStartTime.value : editingEndTime.value
+
+    if (!timeRegex.test(timeValue)) {
+      ElMessage.warning({
+        message: '时间格式不正确，应为 HH:MM:SS,mmm',
+        duration: 2000,
+      })
+      // 恢复原始值
+      if (type === 'start') {
+        editingStartTime.value = subtitleStore.formatTimeStamp(currentEntry.value.startTime)
+      } else {
+        editingEndTime.value = subtitleStore.formatTimeStamp(currentEntry.value.endTime)
+      }
+      return
+    }
+
+    // 解析时间字符串为 TimeStamp 对象
+    const match = timeValue.match(timeRegex)!
+    const newTime: TimeStamp = {
+      hours: parseInt(match[1]),
+      minutes: parseInt(match[2]),
+      seconds: parseInt(match[3]),
+      milliseconds: parseInt(match[4])
+    }
+
+    // 如果正在播放，暂停
+    if (audioStore.playerState.isPlaying) {
+      audioStore.pause()
+    }
+
+    // 更新时间
+    if (type === 'start') {
+      subtitleStore.updateEntryTime(currentEntry.value.id, newTime, currentEntry.value.endTime)
+    } else {
+      subtitleStore.updateEntryTime(currentEntry.value.id, currentEntry.value.startTime, newTime)
+    }
+
+    // 保存文件
+    if (subtitleStore.currentFilePath) {
+      await subtitleStore.saveToFile()
+    }
+  } catch (error) {
+    ElMessage.error({
+      message: '时间更新失败',
+      duration: 2000,
+    })
+    // 恢复原始值
+    if (type === 'start' && currentEntry.value) {
+      editingStartTime.value = subtitleStore.formatTimeStamp(currentEntry.value.startTime)
+    } else if (currentEntry.value) {
+      editingEndTime.value = subtitleStore.formatTimeStamp(currentEntry.value.endTime)
+    }
+  }
+}
+
+// 微调时间（增加或减少指定毫秒数）
+const adjustTime = async (type: 'start' | 'end', deltaMs: number) => {
+  if (!currentEntry.value) return
+
+  try {
+    // 如果正在播放，暂停
+    if (audioStore.playerState.isPlaying) {
+      audioStore.pause()
+    }
+
+    // 获取当前时间并转换为毫秒
+    const currentTime = type === 'start' ? currentEntry.value.startTime : currentEntry.value.endTime
+    let totalMs = timeStampToMs(currentTime)
+
+    // 添加增量
+    totalMs += deltaMs
+
+    // 确保时间不为负
+    if (totalMs < 0) {
+      totalMs = 0
+    }
+
+    // 转换回 TimeStamp 格式
+    const hours = Math.floor(totalMs / 3600000)
+    const minutes = Math.floor((totalMs % 3600000) / 60000)
+    const seconds = Math.floor((totalMs % 60000) / 1000)
+    const milliseconds = totalMs % 1000
+
+    const newTime: TimeStamp = {
+      hours,
+      minutes,
+      seconds,
+      milliseconds
+    }
+
+    // 更新时间
+    if (type === 'start') {
+      subtitleStore.updateEntryTime(currentEntry.value.id, newTime, currentEntry.value.endTime)
+      editingStartTime.value = subtitleStore.formatTimeStamp(newTime)
+    } else {
+      subtitleStore.updateEntryTime(currentEntry.value.id, currentEntry.value.startTime, newTime)
+      editingEndTime.value = subtitleStore.formatTimeStamp(newTime)
+    }
+
+    // 保存文件
+    if (subtitleStore.currentFilePath) {
+      await subtitleStore.saveToFile()
+    }
+  } catch (error) {
+    ElMessage.error({
+      message: '时间调整失败',
+      duration: 2000,
+    })
+  }
+}
+
 // 处理波形点击跳转
 const handleWaveformSeek = (time: number) => {
   audioStore.seek(time)
@@ -683,6 +805,22 @@ const handleZoomOut = () => {
 
 // 返回欢迎页
 const goBack = async () => {
+  // 清理音频状态
+  if (audioStore.currentAudio) {
+    audioStore.unloadAudio()
+  }
+
+  // 清理字幕状态
+  subtitleStore.$reset()
+
+  // 清理本地状态
+  searchText.value = ''
+  replaceText.value = ''
+  showReplace.value = false
+  selectedEntryId.value = null
+  editingText.value = ''
+
+  // 返回欢迎页
   router.push('/')
 }
 
@@ -1127,66 +1265,101 @@ const handleKeydown = (e: KeyboardEvent) => {
             <h3 class="edit-title">字幕 #{{ currentEntry.id }}</h3>
           </div>
 
-          <!-- 时间编辑 -->
-          <div class="time-edit-row">
-            <div class="time-field">
-              <label>开始</label>
-              <el-input
-                :model-value="subtitleStore.formatTimeStamp(currentEntry.startTime)"
-                size="small"
-                readonly
-              />
+          <!-- 时间编辑卡片 -->
+          <div class="time-edit-card">
+            <div class="time-fields-compact">
+              <!-- 开始时间 -->
+              <div class="time-control-group">
+                <label class="time-label">开始</label>
+                <div class="time-value-wrapper">
+                  <button class="time-btn" @click="adjustTime('start', -100)" title="向前移动 100ms">
+                    <span>−</span>
+                  </button>
+                  <el-input
+                    v-model="editingStartTime"
+                    class="time-input-compact"
+                    size="small"
+                    placeholder="00:00:00,000"
+                    @blur="() => handleTimeChange('start')"
+                    @keyup.enter="() => handleTimeChange('start')"
+                  />
+                  <button class="time-btn" @click="adjustTime('start', 100)" title="向后移动 100ms">
+                    <span>+</span>
+                  </button>
+                </div>
+              </div>
+
+              <div class="time-arrow-compact">→</div>
+
+              <!-- 结束时间 -->
+              <div class="time-control-group">
+                <label class="time-label">结束</label>
+                <div class="time-value-wrapper">
+                  <button class="time-btn" @click="adjustTime('end', -100)" title="向前移动 100ms">
+                    <span>−</span>
+                  </button>
+                  <el-input
+                    v-model="editingEndTime"
+                    class="time-input-compact"
+                    size="small"
+                    placeholder="00:00:00,000"
+                    @blur="() => handleTimeChange('end')"
+                    @keyup.enter="() => handleTimeChange('end')"
+                  />
+                  <button class="time-btn" @click="adjustTime('end', 100)" title="向后移动 100ms">
+                    <span>+</span>
+                  </button>
+                </div>
+              </div>
+
+              <!-- 时长显示 -->
+              <div class="duration-display">
+                <label class="time-label">时长</label>
+                <div class="duration-value">
+                  {{ `00:${String(Math.floor((subtitleStore.formatTimeStamp(currentEntry.endTime).slice(6, 8) as any) - (subtitleStore.formatTimeStamp(currentEntry.startTime).slice(6, 8) as any))).padStart(2, '0')},000` }}
+                </div>
+              </div>
             </div>
+          </div>
 
-            <div class="time-arrow">→</div>
-
-            <div class="time-field">
-              <label>结束</label>
-              <el-input
-                :model-value="subtitleStore.formatTimeStamp(currentEntry.endTime)"
-                size="small"
-                readonly
-              />
+          <!-- 文本编辑卡片 -->
+          <div class="text-edit-card">
+            <div class="card-header">
+              <span class="card-title">字幕文本</span>
+              <span class="text-count">{{ editingText.length }} 字</span>
             </div>
-
-            <div class="time-field">
-              <label>时长</label>
+            <div class="textarea-wrapper">
               <el-input
-                :model-value="`00:${String(Math.floor((subtitleStore.formatTimeStamp(currentEntry.endTime).slice(6, 8) as any) - (subtitleStore.formatTimeStamp(currentEntry.startTime).slice(6, 8) as any))).padStart(2, '0')},000`"
-                size="small"
-                readonly
+                ref="textareaInputRef"
+                v-model="editingText"
+                placeholder="在此输入字幕文本..."
+                @focus="isUserEditing = true"
+                @blur="handleTextareaBlur"
+                @input="handleTextInput"
+                class="text-input"
               />
             </div>
           </div>
 
-          <!-- 文本编辑 -->
-          <div class="text-edit-section" ref="textareaRef">
-            <label class="text-label">字幕文本</label>
-            <el-input
-              ref="textareaInputRef"
-              v-model="editingText"
-              type="textarea"
-              :rows="6"
-              placeholder="支持拖动时间调整时间，点击时间精确编辑"
-              @focus="isUserEditing = true"
-              @blur="handleTextareaBlur"
-              @input="handleTextInput"
-            />
-            <div class="text-meta">
-              <span>{{ editingText.length }} 字</span>
-            </div>
-          </div>
-
-          <!-- 底部操作 -->
-          <div class="bottom-actions">
-            <el-button text @click="handleRemoveHTML">移除HTML</el-button>
-            <el-button text type="danger" @click="handleDeleteEntry">删除字幕</el-button>
+          <!-- 操作按钮卡片 -->
+          <div class="actions-card">
+            <el-button class="action-btn" @click="handleRemoveHTML">
+              <el-icon class="btn-icon"><PriceTag /></el-icon>
+              移除HTML标签
+            </el-button>
+            <el-button class="action-btn danger" type="danger" plain @click="handleDeleteEntry">
+              <el-icon class="btn-icon"><Delete /></el-icon>
+              删除字幕
+            </el-button>
           </div>
         </div>
 
         <!-- 无选中状态 -->
         <div v-else class="no-selection">
-          <p class="text-gray-400">请从左侧选择一条字幕进行编辑</p>
+          <div class="no-selection-content">
+            <el-icon class="no-selection-icon"><Document /></el-icon>
+            <p class="no-selection-text">请从左侧选择一条字幕进行编辑</p>
+          </div>
         </div>
       </div>
     </div>
@@ -1610,7 +1783,7 @@ const handleKeydown = (e: KeyboardEvent) => {
 /* 右侧字幕编辑区 */
 .subtitle-edit-panel {
   flex: 1;
-  background: white;
+  background: #f9fafb;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -1627,12 +1800,15 @@ const handleKeydown = (e: KeyboardEvent) => {
 }
 
 .subtitle-edit-section {
-  padding: 1.5rem;
+  padding: 1.25rem;
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
 }
 
 .edit-header {
-  margin-bottom: 1.5rem;
+  margin-bottom: 0;
 }
 
 .edit-title {
@@ -1641,64 +1817,289 @@ const handleKeydown = (e: KeyboardEvent) => {
   color: #333;
 }
 
-.time-edit-row {
+/* 卡片样式 */
+.time-edit-card,
+.text-edit-card,
+.actions-card {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.75rem;
+  overflow: hidden;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05);
+  transition: all 0.3s ease;
+}
+
+.time-edit-card:hover,
+.text-edit-card:hover {
+  box-shadow: 0 4px 12px 0 rgba(0, 0, 0, 0.08);
+  border-color: #d1d5db;
+}
+
+/* 卡片头部 */
+.card-header {
+  padding: 0.75rem 1rem;
+  background: #f9fafb;
+  border-bottom: 1px solid #e5e7eb;
   display: flex;
-  align-items: flex-end;
-  gap: 1rem;
-  margin-bottom: 1.5rem;
+  align-items: center;
+  justify-content: space-between;
 }
 
-.time-field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  flex: 1;
+.card-title {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: #374151;
+  letter-spacing: 0.01em;
 }
 
-.time-field label {
-  font-size: 0.875rem;
-  color: #6b7280;
-}
-
-.time-arrow {
-  padding-bottom: 0.5rem;
-  color: #9ca3af;
-}
-
-.text-edit-section {
-  margin-bottom: 1.5rem;
-}
-
-.text-label {
-  display: block;
-  font-size: 0.875rem;
-  color: #6b7280;
-  margin-bottom: 0.5rem;
-}
-
-.text-meta {
-  margin-top: 0.5rem;
-  text-align: right;
+.text-count {
   font-size: 0.75rem;
   color: #9ca3af;
+  font-weight: 500;
+  padding: 0.25rem 0.625rem;
+  background: #ffffff;
+  border-radius: 0.375rem;
+  border: 1px solid #e5e7eb;
 }
 
-.edit-actions {
-  margin-bottom: 2rem;
-}
-
-.bottom-actions {
+/* 紧凑的时间编辑布局 */
+.time-fields-compact {
   display: flex;
-  gap: 1rem;
-  padding-top: 1rem;
-  border-top: 1px solid #e5e7eb;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  flex-wrap: wrap;
 }
 
+.time-control-group {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.time-label {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: #6b7280;
+  white-space: nowrap;
+  min-width: 32px;
+}
+
+.time-value-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.time-input-compact {
+  width: 120px;
+}
+
+.time-input-compact :deep(.el-input__wrapper) {
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  font-size: 0.8125rem;
+  padding: 0.25rem 0.5rem;
+  background: #f9fafb;
+  border-radius: 0.375rem;
+  border: 1px solid #e5e7eb;
+  transition: all 0.2s ease;
+  height: 28px;
+  box-sizing: border-box;
+}
+
+.time-input-compact :deep(.el-input__wrapper:hover) {
+  border-color: #d1d5db;
+  background: #ffffff;
+}
+
+.time-input-compact :deep(.el-input__wrapper.is-focus) {
+  border-color: #3b82f6;
+  background: #ffffff;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
+}
+
+.time-input-compact :deep(.el-input__inner) {
+  text-align: center;
+  color: #1f2937;
+  font-size: 0.8125rem;
+}
+
+.time-adjust-btns {
+  display: flex;
+  gap: 0.125rem;
+}
+
+.time-btn {
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #ffffff;
+  border: 1px solid #d1d5db;
+  border-radius: 0.25rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 0.875rem;
+  color: #6b7280;
+  padding: 0;
+}
+
+.time-btn:hover {
+  background: #f3f4f6;
+  border-color: #9ca3af;
+  color: #374151;
+}
+
+.time-btn:active {
+  background: #e5e7eb;
+  transform: scale(0.95);
+}
+
+.time-arrow-compact {
+  font-size: 0.875rem;
+  color: #9ca3af;
+  font-weight: 300;
+  margin: 0 0.125rem;
+}
+
+.duration-display {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.duration-value {
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: #1e40af;
+  padding: 0.25rem 0.5rem;
+  background: #eff6ff;
+  border-radius: 0.375rem;
+  border: 1px solid #bfdbfe;
+  text-align: center;
+  min-width: 120px;
+  height: 28px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 文本编辑区域 */
+.textarea-wrapper {
+  padding: 1rem;
+}
+
+.text-input :deep(.el-input__wrapper) {
+  border-radius: 0.5rem;
+  border: 1px solid #e5e7eb;
+  padding: 0 0.75rem;
+  font-size: 0.9375rem;
+  line-height: 1.6;
+  transition: all 0.2s ease;
+  background: #ffffff;
+  height: 40px;
+  box-sizing: border-box;
+}
+
+.text-input :deep(.el-input__wrapper:hover) {
+  border-color: #d1d5db;
+}
+
+.text-input :deep(.el-input__wrapper.is-focus) {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.text-input :deep(.el-input__inner) {
+  color: #1f2937;
+  font-size: 0.9375rem;
+}
+
+.text-input :deep(.el-input__inner::placeholder) {
+  color: #9ca3af;
+}
+
+/* 操作按钮卡片 */
+.actions-card {
+  display: flex;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  background: #fafafa;
+}
+
+.action-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.625rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  border-radius: 0.5rem;
+  transition: all 0.2s ease;
+}
+
+.action-btn .btn-icon {
+  font-size: 1.125rem;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+}
+
+.action-btn:not(.danger) {
+  background: #ffffff;
+  border: 1px solid #d1d5db;
+  color: #374151;
+}
+
+.action-btn:not(.danger):hover {
+  background: #f3f4f6;
+  border-color: #9ca3af;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.action-btn.danger {
+  border-width: 1px;
+}
+
+.action-btn.danger:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(239, 68, 68, 0.15);
+}
+
+/* 无选中状态优化 */
 .no-selection {
   flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 3rem;
+}
+
+.no-selection-content {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+}
+
+.no-selection-icon {
+  font-size: 5rem;
+  opacity: 0.25;
+  line-height: 1;
+  color: #9ca3af;
+}
+
+.no-selection-text {
+  font-size: 0.9375rem;
+  color: #9ca3af;
+  margin: 0;
 }
 
 /* 搜索高亮样式 */
