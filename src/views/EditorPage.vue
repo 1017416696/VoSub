@@ -468,8 +468,16 @@ const handleDeleteEntry = async () => {
   }
 }
 
-// 复制字幕文本
+// 复制字幕文本（带防抖，防止快捷键重复触发）
+let lastCopyTime = 0
 const copySubtitleText = async (id: number) => {
+  // 防抖：300ms 内不重复触发
+  const now = Date.now()
+  if (now - lastCopyTime < 300) {
+    return
+  }
+  lastCopyTime = now
+
   const entry = subtitleStore.entries.find((e) => e.id === id)
   if (!entry) return
 
