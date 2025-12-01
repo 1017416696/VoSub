@@ -583,6 +583,65 @@ const handleRemoveHTML = () => {
   }
 }
 
+// 为当前字幕添加中英文空格
+const handleAddCJKSpaces = () => {
+  if (!currentEntry.value) return
+
+  // 如果正在播放，暂停
+  if (audioStore.playerState.isPlaying) {
+    audioStore.pause()
+  }
+
+  subtitleStore.addSpacesForEntry(currentEntry.value.id)
+  editingText.value = currentEntry.value.text
+}
+
+// 批量添加中英文空格（供菜单调用）
+const handleBatchAddCJKSpaces = async () => {
+  // 如果正在播放，暂停
+  if (audioStore.playerState.isPlaying) {
+    audioStore.pause()
+  }
+
+  subtitleStore.addSpacesBetweenCJKAndAlphanumeric()
+  if (currentEntry.value) {
+    editingText.value = currentEntry.value.text
+  }
+
+  // 保存文件
+  if (subtitleStore.currentFilePath) {
+    try {
+      await subtitleStore.saveToFile()
+      ElMessage.success({ message: '已批量添加中英文空格', duration: 1500 })
+    } catch (error) {
+      // 保存失败，静默处理
+    }
+  }
+}
+
+// 批量移除HTML标签（供菜单调用）
+const handleBatchRemoveHTML = async () => {
+  // 如果正在播放，暂停
+  if (audioStore.playerState.isPlaying) {
+    audioStore.pause()
+  }
+
+  subtitleStore.removeHTMLTags()
+  if (currentEntry.value) {
+    editingText.value = currentEntry.value.text
+  }
+
+  // 保存文件
+  if (subtitleStore.currentFilePath) {
+    try {
+      await subtitleStore.saveToFile()
+      ElMessage.success({ message: '已批量移除HTML标签', duration: 1500 })
+    } catch (error) {
+      // 保存失败，静默处理
+    }
+  }
+}
+
 // 处理时间输入变化
 const handleTimeChange = async (type: 'start' | 'end') => {
   if (!currentEntry.value) return
@@ -1491,6 +1550,10 @@ const handleKeydown = (e: KeyboardEvent) => {
             <el-button class="action-btn" @click="handleRemoveHTML">
               <el-icon class="btn-icon"><PriceTag /></el-icon>
               移除HTML标签
+            </el-button>
+            <el-button class="action-btn" @click="handleAddCJKSpaces">
+              <el-icon class="btn-icon"><Document /></el-icon>
+              中英文加空格
             </el-button>
             <el-button class="action-btn danger" type="danger" plain @click="handleDeleteEntry">
               <el-icon class="btn-icon"><Delete /></el-icon>

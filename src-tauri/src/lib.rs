@@ -141,6 +141,9 @@ pub fn run() {
                     .item(&PredefinedMenuItem::copy(app, Some("Copy"))?)
                     .item(&PredefinedMenuItem::paste(app, Some("Paste"))?)
                     .item(&PredefinedMenuItem::select_all(app, Some("Select All"))?)
+                    .separator()
+                    .text("batch-add-cjk-spaces", "批量添加中英文空格")
+                    .text("batch-remove-html", "批量移除HTML标签")
                     .build()?;
 
                 // 创建菜单：应用菜单 -> File -> Edit
@@ -173,6 +176,9 @@ pub fn run() {
                     .item(&PredefinedMenuItem::copy(app, Some("Copy"))?)
                     .item(&PredefinedMenuItem::paste(app, Some("Paste"))?)
                     .item(&PredefinedMenuItem::select_all(app, Some("Select All"))?)
+                    .separator()
+                    .text("batch-add-cjk-spaces", "批量添加中英文空格")
+                    .text("batch-remove-html", "批量移除HTML标签")
                     .build()?;
 
                 // 创建菜单：File -> Edit
@@ -205,6 +211,30 @@ pub fn run() {
                                 (async () => {
                                     if (window.__globalSaveFile && typeof window.__globalSaveFile === 'function') {
                                         await window.__globalSaveFile();
+                                    }
+                                })();
+                            "#;
+                            let _ = window.eval(js_code);
+                        }
+                    }
+                    "batch-add-cjk-spaces" => {
+                        if let Some(window) = app_handle.get_webview_window("main") {
+                            let js_code = r#"
+                                (async () => {
+                                    if (window.__globalBatchAddCJKSpaces && typeof window.__globalBatchAddCJKSpaces === 'function') {
+                                        await window.__globalBatchAddCJKSpaces();
+                                    }
+                                })();
+                            "#;
+                            let _ = window.eval(js_code);
+                        }
+                    }
+                    "batch-remove-html" => {
+                        if let Some(window) = app_handle.get_webview_window("main") {
+                            let js_code = r#"
+                                (async () => {
+                                    if (window.__globalBatchRemoveHTML && typeof window.__globalBatchRemoveHTML === 'function') {
+                                        await window.__globalBatchRemoveHTML();
                                     }
                                 })();
                             "#;

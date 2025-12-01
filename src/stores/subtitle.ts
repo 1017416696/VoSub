@@ -455,6 +455,45 @@ export const useSubtitleStore = defineStore('subtitle', () => {
     })
   }
 
+  // 为文本添加中英文空格的辅助函数
+  const addCJKSpacesToText = (text: string): string => {
+    let result = text
+    // 在中文和英文/数字之间添加空格（中文在前）
+    result = result.replace(/([\u4e00-\u9fa5])([A-Za-z0-9])/g, '$1 $2')
+    // 在英文/数字和中文之间添加空格（英文/数字在前）
+    result = result.replace(/([A-Za-z0-9])([\u4e00-\u9fa5])/g, '$1 $2')
+    // 避免重复空格
+    result = result.replace(/\s+/g, ' ')
+    return result
+  }
+
+  // 为单条字幕添加中英文空格
+  const addSpacesForEntry = (entryId: number) => {
+    const entry = entries.value.find((e) => e.id === entryId)
+    if (!entry) return
+
+    const newText = addCJKSpacesToText(entry.text)
+    if (newText !== entry.text) {
+      updateEntryText(entryId, newText)
+    }
+  }
+
+  // 批量在中英文/中文数字之间添加空格
+  const addSpacesBetweenCJKAndAlphanumeric = () => {
+    entries.value.forEach((entry) => {
+      entry.text = addCJKSpacesToText(entry.text)
+    })
+
+    addHistory({
+      type: HistoryActionType.BATCH,
+      timestamp: Date.now(),
+      entryId: -1,
+      before: {},
+      after: {},
+      description: '批量添加中英文空格',
+    })
+  }
+
   // 添加历史记录
   const addHistory = (action: HistoryAction) => {
     // 清除当前位置之后的历史
@@ -591,6 +630,8 @@ export const useSubtitleStore = defineStore('subtitle', () => {
     addEntry,
     removePunctuation,
     removeHTMLTags,
+    addSpacesForEntry,
+    addSpacesBetweenCJKAndAlphanumeric,
     detectTimeConflicts,
     assignSubtitleToTracks,
     undo,

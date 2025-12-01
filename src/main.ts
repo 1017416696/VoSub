@@ -68,9 +68,45 @@ const globalSaveFile = async () => {
   }
 }
 
-  // 将全局函数暴露到 window 对象
-  ; (window as any).__globalOpenFile = globalOpenFile
-  ; (window as any).__globalSaveFile = globalSaveFile
+// 全局批量添加中英文空格函数
+const globalBatchAddCJKSpaces = async () => {
+  try {
+    const { useSubtitleStore } = await import('./stores/subtitle')
+    const store = useSubtitleStore()
+    if (store.entries.length === 0) {
+      return
+    }
+    store.addSpacesBetweenCJKAndAlphanumeric()
+    if (store.currentFilePath) {
+      await store.saveToFile()
+    }
+  } catch (error) {
+    // 处理失败，静默处理
+  }
+}
+
+// 全局批量移除HTML标签函数
+const globalBatchRemoveHTML = async () => {
+  try {
+    const { useSubtitleStore } = await import('./stores/subtitle')
+    const store = useSubtitleStore()
+    if (store.entries.length === 0) {
+      return
+    }
+    store.removeHTMLTags()
+    if (store.currentFilePath) {
+      await store.saveToFile()
+    }
+  } catch (error) {
+    // 处理失败，静默处理
+  }
+}
+
+// 将全局函数暴露到 window 对象
+;(window as any).__globalOpenFile = globalOpenFile
+;(window as any).__globalSaveFile = globalSaveFile
+;(window as any).__globalBatchAddCJKSpaces = globalBatchAddCJKSpaces
+;(window as any).__globalBatchRemoveHTML = globalBatchRemoveHTML
 
 // 全局菜单事件监听器（在应用启动时注册）
 listen<void>('menu:open-file', async () => {
