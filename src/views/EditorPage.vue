@@ -1549,15 +1549,15 @@ const handleKeydown = (e: KeyboardEvent) => {
           <div class="actions-card">
             <el-button class="action-btn" @click="handleRemoveHTML">
               <el-icon class="btn-icon"><PriceTag /></el-icon>
-              移除HTML标签
+              <span>移除HTML标签</span>
             </el-button>
             <el-button class="action-btn" @click="handleAddCJKSpaces">
               <el-icon class="btn-icon"><Document /></el-icon>
-              中英文加空格
+              <span>中英文加空格</span>
             </el-button>
             <el-button class="action-btn danger" type="danger" plain @click="handleDeleteEntry">
               <el-icon class="btn-icon"><Delete /></el-icon>
-              删除字幕
+              <span>删除字幕</span>
             </el-button>
           </div>
         </div>

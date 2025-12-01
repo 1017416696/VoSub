@@ -6,7 +6,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Setting } from '@element-plus/icons-vue'
+import { Setting, Document, Headset } from '@element-plus/icons-vue'
 import { useSubtitleStore } from '@/stores/subtitle'
 import { useAudioStore } from '@/stores/audio'
 import type { SRTFile, AudioFile } from '@/types/subtitle'
@@ -295,8 +295,8 @@ const openSettings = () => {
             :disabled="isLoading"
             @click="openSRTFile"
           >
-            <i class="i-mdi-file-document mr-2"></i>
-            选择 SRT 文件
+            <el-icon><Document /></el-icon>
+            <span>选择 SRT 文件</span>
           </el-button>
           <el-button
             type="success"
@@ -305,8 +305,8 @@ const openSettings = () => {
             :disabled="isLoading"
             @click="openAudioFile"
           >
-            <i class="i-mdi-headset mr-2"></i>
-            选择音频文件
+            <el-icon><Headset /></el-icon>
+            <span>选择音频文件</span>
           </el-button>
         </div>
 
@@ -489,6 +489,10 @@ const openSettings = () => {
   height: 48px;
   font-size: 15px;
   font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
 }
 
 .tips-container {
