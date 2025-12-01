@@ -4,8 +4,9 @@ mod waveform_generator;
 use srt_parser::{read_srt_file, write_srt_file, SRTFile, SubtitleEntry};
 use waveform_generator::{generate_waveform_with_progress, ProgressCallback};
 use std::fs;
-use tauri::menu::{MenuBuilder, SubmenuBuilder};
+use tauri::menu::{MenuBuilder, PredefinedMenuItem, SubmenuBuilder};
 use tauri::{Emitter, Manager};
+use tauri_plugin_prevent_default::Flags;
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
@@ -131,14 +132,15 @@ pub fn run() {
                     .text("close", "Close Window")
                     .build()?;
 
-                // 创建 Edit 菜单（macOS 使用 Cmd）
+                // 创建 Edit 菜单（macOS 使用 Cmd）- 使用预定义菜单项以支持系统快捷键
                 let edit_menu = SubmenuBuilder::new(app, "Edit")
-                    .text("undo", "Undo\t⌘ Z")
-                    .text("redo", "Redo\t⌘ ⇧ Z")
+                    .item(&PredefinedMenuItem::undo(app, Some("Undo"))?)
+                    .item(&PredefinedMenuItem::redo(app, Some("Redo"))?)
                     .separator()
-                    .text("cut", "Cut\t⌘ X")
-                    .text("copy", "Copy\t⌘ C")
-                    .text("paste", "Paste\t⌘ V")
+                    .item(&PredefinedMenuItem::cut(app, Some("Cut"))?)
+                    .item(&PredefinedMenuItem::copy(app, Some("Copy"))?)
+                    .item(&PredefinedMenuItem::paste(app, Some("Paste"))?)
+                    .item(&PredefinedMenuItem::select_all(app, Some("Select All"))?)
                     .build()?;
 
                 // 创建菜单：应用菜单 -> File -> Edit
@@ -162,14 +164,15 @@ pub fn run() {
                     .text("close", "Close Window")
                     .build()?;
 
-                // 创建 Edit 菜单（Windows 使用 Ctrl）
+                // 创建 Edit 菜单（Windows 使用 Ctrl）- 使用预定义菜单项以支持系统快捷键
                 let edit_menu = SubmenuBuilder::new(app, "Edit")
-                    .text("undo", "Undo\tCtrl+Z")
-                    .text("redo", "Redo\tCtrl+Shift+Z")
+                    .item(&PredefinedMenuItem::undo(app, Some("Undo"))?)
+                    .item(&PredefinedMenuItem::redo(app, Some("Redo"))?)
                     .separator()
-                    .text("cut", "Cut\tCtrl+X")
-                    .text("copy", "Copy\tCtrl+C")
-                    .text("paste", "Paste\tCtrl+V")
+                    .item(&PredefinedMenuItem::cut(app, Some("Cut"))?)
+                    .item(&PredefinedMenuItem::copy(app, Some("Copy"))?)
+                    .item(&PredefinedMenuItem::paste(app, Some("Paste"))?)
+                    .item(&PredefinedMenuItem::select_all(app, Some("Select All"))?)
                     .build()?;
 
                 // 创建菜单：File -> Edit
@@ -220,7 +223,12 @@ pub fn run() {
             Ok(())
         })
         .plugin(tauri_plugin_shell::init())
-        .plugin(tauri_plugin_prevent_default::init())
+        .plugin(
+            tauri_plugin_prevent_default::Builder::new()
+                // 只阻止右键菜单，允许复制、粘贴、剪切等编辑快捷键
+                .with_flags(Flags::CONTEXT_MENU)
+                .build(),
+        )
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![greet, read_srt, write_srt, read_audio_file, generate_audio_waveform, trigger_open_file])
         .run(tauri::generate_context!())
