@@ -11,6 +11,7 @@ import { useConfigStore } from '@/stores/config'
 import { timeStampToMs } from '@/utils/time'
 import type { SRTFile, AudioFile, TimeStamp } from '@/types/subtitle'
 import WaveformViewer from '@/components/WaveformViewer.vue'
+import SettingsDialog from '@/components/SettingsDialog.vue'
 import { DocumentCopy, VideoPlay, Delete, PriceTag, Document, Setting, Plus, Scissor, Search, ArrowDown, Switch } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
@@ -54,6 +55,7 @@ const isUserSelectingEntry = ref(false) // 标记用户是否在手动选择字�
 const isScissorMode = ref(false) // 剪刀模式：分割字幕
 const showSearchPanel = ref(false) // 是否显示搜索面板
 const activePanel = ref<'list' | 'search'>('list') // 当前激活的面板
+const showSettingsDialog = ref(false) // 是否显示设置弹窗
 
 // 切换搜索面板
 const toggleSearchPanel = () => {
@@ -937,8 +939,7 @@ const onTitlebarMousedown = async (e: MouseEvent) => {
 
 // 打开设置
 const openSettings = () => {
-  // TODO: 实现设置功能
-  ElMessage.info('设置功能开发中...')
+  showSettingsDialog.value = true
 }
 
 // 添加字幕
@@ -1243,6 +1244,10 @@ const handleKeydown = (e: KeyboardEvent) => {
     // x 键：开启/关闭分割模式
     e.preventDefault()
     handleScissor()
+  } else if (pressedKey === 'Cmd+,' || pressedKey === 'Ctrl+,') {
+    // Command+逗号 或 Ctrl+逗号：打开设置
+    e.preventDefault()
+    openSettings()
   }
 }
 </script>
@@ -1657,6 +1662,8 @@ const handleKeydown = (e: KeyboardEvent) => {
       </div>
     </div>
 
+    <!-- 设置弹窗 -->
+    <SettingsDialog v-model:visible="showSettingsDialog" />
   </div>
 </template>
 

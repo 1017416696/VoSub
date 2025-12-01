@@ -28,9 +28,11 @@ export const useConfigStore = defineStore('config', () => {
     { key: 'Ctrl+S', description: '保存文件', action: 'save-file' },
     { key: 'Ctrl+O', description: '打开文件', action: 'open-file' },
     { key: 'Ctrl+F', description: '查找', action: 'find' },
+    { key: 'Ctrl+R', description: '替换', action: 'replace' },
     { key: 'Ctrl+N', description: '新增字幕', action: 'new-subtitle' },
     { key: 'Ctrl+Z', description: '撤销', action: 'undo' },
     { key: 'Ctrl+Shift+Z', description: '重做', action: 'redo' },
+    { key: 'Ctrl+,', description: '设置', action: 'settings' },
   ])
 
   // 更新配置
