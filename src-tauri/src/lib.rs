@@ -119,28 +119,28 @@ pub fn run() {
             {
                 // 在 macOS 上，第一个子菜单会自动成为应用菜单
                 let app_menu = SubmenuBuilder::new(app, "SRT Editor")
-                    .text("about", "About SRT Editor")
+                    .text("about", "关于 SRT Editor")
                     .separator()
-                    .text("quit", "Quit SRT Editor")
+                    .text("quit", "退出 SRT Editor")
                     .build()?;
 
-                // 创建 File 菜单（macOS 使用 Cmd）
-                let file_menu = SubmenuBuilder::new(app, "File")
-                    .text("open", "Open\t⌘ O")
-                    .text("save", "Save\t⌘ S")
+                // 创建 文件 菜单（macOS 使用 Cmd）
+                let file_menu = SubmenuBuilder::new(app, "文件")
+                    .text("open", "打开\t⌘ O")
+                    .text("save", "保存\t⌘ S")
                     .separator()
-                    .text("close", "Close Window")
+                    .text("close", "关闭窗口")
                     .build()?;
 
-                // 创建 Edit 菜单（macOS 使用 Cmd）- 使用预定义菜单项以支持系统快捷键
-                let edit_menu = SubmenuBuilder::new(app, "Edit")
-                    .item(&PredefinedMenuItem::undo(app, Some("Undo"))?)
-                    .item(&PredefinedMenuItem::redo(app, Some("Redo"))?)
+                // 创建 编辑 菜单（macOS 使用 Cmd）- 使用预定义菜单项以支持系统快捷键
+                let edit_menu = SubmenuBuilder::new(app, "编辑")
+                    .item(&PredefinedMenuItem::undo(app, Some("撤销"))?)
+                    .item(&PredefinedMenuItem::redo(app, Some("重做"))?)
                     .separator()
-                    .item(&PredefinedMenuItem::cut(app, Some("Cut"))?)
-                    .item(&PredefinedMenuItem::copy(app, Some("Copy"))?)
-                    .item(&PredefinedMenuItem::paste(app, Some("Paste"))?)
-                    .item(&PredefinedMenuItem::select_all(app, Some("Select All"))?)
+                    .item(&PredefinedMenuItem::cut(app, Some("剪切"))?)
+                    .item(&PredefinedMenuItem::copy(app, Some("复制"))?)
+                    .item(&PredefinedMenuItem::paste(app, Some("粘贴"))?)
+                    .item(&PredefinedMenuItem::select_all(app, Some("全选"))?)
                     .separator()
                     .text("batch-add-cjk-spaces", "批量添加中英文空格")
                     .text("batch-remove-html", "批量移除HTML标签")
@@ -159,23 +159,23 @@ pub fn run() {
             // Windows 配置
             #[cfg(target_os = "windows")]
             {
-                // 创建 File 菜单（Windows 使用 Ctrl）
-                let file_menu = SubmenuBuilder::new(app, "File")
-                    .text("open", "Open\tCtrl+O")
-                    .text("save", "Save\tCtrl+S")
+                // 创建 文件 菜单（Windows 使用 Ctrl）
+                let file_menu = SubmenuBuilder::new(app, "文件")
+                    .text("open", "打开\tCtrl+O")
+                    .text("save", "保存\tCtrl+S")
                     .separator()
-                    .text("close", "Close Window")
+                    .text("close", "关闭窗口")
                     .build()?;
 
-                // 创建 Edit 菜单（Windows 使用 Ctrl）- 使用预定义菜单项以支持系统快捷键
-                let edit_menu = SubmenuBuilder::new(app, "Edit")
-                    .item(&PredefinedMenuItem::undo(app, Some("Undo"))?)
-                    .item(&PredefinedMenuItem::redo(app, Some("Redo"))?)
+                // 创建 编辑 菜单（Windows 使用 Ctrl）- 使用预定义菜单项以支持系统快捷键
+                let edit_menu = SubmenuBuilder::new(app, "编辑")
+                    .item(&PredefinedMenuItem::undo(app, Some("撤销"))?)
+                    .item(&PredefinedMenuItem::redo(app, Some("重做"))?)
                     .separator()
-                    .item(&PredefinedMenuItem::cut(app, Some("Cut"))?)
-                    .item(&PredefinedMenuItem::copy(app, Some("Copy"))?)
-                    .item(&PredefinedMenuItem::paste(app, Some("Paste"))?)
-                    .item(&PredefinedMenuItem::select_all(app, Some("Select All"))?)
+                    .item(&PredefinedMenuItem::cut(app, Some("剪切"))?)
+                    .item(&PredefinedMenuItem::copy(app, Some("复制"))?)
+                    .item(&PredefinedMenuItem::paste(app, Some("粘贴"))?)
+                    .item(&PredefinedMenuItem::select_all(app, Some("全选"))?)
                     .separator()
                     .text("batch-add-cjk-spaces", "批量添加中英文空格")
                     .text("batch-remove-html", "批量移除HTML标签")
