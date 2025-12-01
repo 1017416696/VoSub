@@ -277,6 +277,9 @@ watch(() => audioStore.playerState.currentTime, (currentTime) => {
   }
 })
 
+// 用于存储事件监听器的清理函数
+let unlistenOpenFile: (() => void) | null = null
+
 // 初始化时选中第一条字幕，设置菜单监听和快捷键
 onMounted(async () => {
   if (subtitleStore.entries.length > 0) {
@@ -294,24 +297,31 @@ onMounted(async () => {
     }
 
     // 注册全局菜单处理函数（供 main.ts 中的全局监听器调用）
-    const unlistenOpenFile = await listen<void>('menu:open-file', async () => {
+    unlistenOpenFile = await listen<void>('menu:open-file', async () => {
       await handleOpenFile()
     })
 
+    // 先移除可能存在的旧监听器（防止热重载时重复注册）
+    document.removeEventListener('keydown', handleKeydown, true)
     // 添加键盘快捷键监听（添加到 document 而不是 window，确保捕获所有键盘事件）
     document.addEventListener('keydown', handleKeydown, true)
-
-    // 在组件卸载时清理所有监听器
-    onBeforeUnmount(() => {
-      unlistenOpenFile()
-      // 清除全局处理函数
-      ;(window as any).__handleMenuOpenFile = null
-      ;(window as any).__handleMenuSave = null
-      document.removeEventListener('keydown', handleKeydown, true)
-    })
   } catch (error) {
     console.error('Error setting up menu handlers:', error)
   }
+})
+
+// 在组件卸载时清理所有监听器（必须在顶层调用）
+onBeforeUnmount(() => {
+  // 清理 Tauri 事件监听器
+  if (unlistenOpenFile) {
+    unlistenOpenFile()
+    unlistenOpenFile = null
+  }
+  // 清除全局处理函数
+  ;(window as any).__handleMenuOpenFile = null
+  ;(window as any).__handleMenuSave = null
+  // 移除键盘事件监听器
+  document.removeEventListener('keydown', handleKeydown, true)
 })
 
 // 打开 SRT 文件
@@ -983,10 +993,6 @@ const handleScissor = () => {
 
   // 切换剪刀模式
   isScissorMode.value = !isScissorMode.value
-
-  if (isScissorMode.value) {
-    ElMessage.info('已进入分割模式，点击时间轴上的字幕进行分割')
-  }
 }
 
 // 处理字幕分割
