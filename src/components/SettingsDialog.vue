@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onBeforeUnmount } from 'vue'
+import { ElMessage } from 'element-plus'
 import { useConfigStore } from '@/stores/config'
-import { Setting, Key, InfoFilled } from '@element-plus/icons-vue'
+import { Setting, Key, InfoFilled, ChatDotRound, Message } from '@element-plus/icons-vue'
+import { open } from '@tauri-apps/plugin-shell'
 
 const props = defineProps<{
   visible: boolean
@@ -14,14 +16,40 @@ const emit = defineEmits<{
 const configStore = useConfigStore()
 
 // 当前选中的菜单项
-const activeMenu = ref<'general' | 'shortcuts' | 'about'>('general')
+const activeMenu = ref<'general' | 'shortcuts' | 'contact' | 'about'>('general')
 
 // 菜单项配置
 const menuItems = [
   { key: 'general', label: '常规设置', icon: Setting },
   { key: 'shortcuts', label: '快捷键列表', icon: Key },
+  { key: 'contact', label: '联系开发者', icon: ChatDotRound },
   { key: 'about', label: '关于', icon: InfoFilled },
 ] as const
+
+// 联系方式
+const contactInfo = {
+  email: ' 1017416696@qq.com',
+  github: 'https://github.com/1017416696/srt-editor.git',
+}
+
+// 打开外部链接
+const openLink = async (url: string) => {
+  try {
+    await open(url)
+  } catch {
+    ElMessage.error('无法打开链接')
+  }
+}
+
+// 复制到剪贴板
+const copyToClipboard = async (text: string) => {
+  try {
+    await navigator.clipboard.writeText(text)
+    ElMessage.success('已复制到剪贴板')
+  } catch {
+    ElMessage.error('复制失败')
+  }
+}
 
 // 关闭弹窗
 const handleClose = () => {
@@ -184,6 +212,46 @@ const appVersion = '0.0.4'
                       :key="index"
                       class="key-cap"
                     >{{ k }}</kbd>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 联系开发者 -->
+            <div v-if="activeMenu === 'contact'" class="content-section">
+              <h2 class="section-title">联系开发者</h2>
+              
+              <div class="contact-content">
+                <p class="contact-intro">如果您有任何问题、建议或反馈，欢迎扫码加入用户交流群：</p>
+                
+                <!-- 群二维码 -->
+                <div class="qrcode-section">
+                  <div class="qrcode-wrapper">
+                    <img src="/qrcode-placeholder.JPG" alt="用户交流群二维码" class="qrcode-img" />
+                  </div>
+                  <p class="qrcode-hint">QQ扫码加入用户交流群</p>
+                </div>
+                
+                <div class="contact-list">
+                  <div class="contact-item">
+                    <div class="contact-info">
+                      <span class="contact-label"><el-icon><Message /></el-icon> 邮箱</span>
+                      <span class="contact-value">{{ contactInfo.email }}</span>
+                    </div>
+                    <el-button size="small" @click="copyToClipboard(contactInfo.email)">复制</el-button>
+                  </div>
+                  
+                  <div class="contact-item">
+                    <div class="contact-info">
+                      <span class="contact-label">
+                        <svg class="github-icon" viewBox="0 0 16 16" fill="currentColor">
+                          <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
+                        </svg>
+                        GitHub
+                      </span>
+                      <span class="contact-value">{{ contactInfo.github }}</span>
+                    </div>
+                    <el-button size="small" @click="openLink(contactInfo.github)">访问</el-button>
                   </div>
                 </div>
               </div>
@@ -465,6 +533,90 @@ const appVersion = '0.0.4'
 .copyright {
   font-size: 12px;
   color: #bbb;
+}
+
+/* 联系开发者页面 */
+.contact-content {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.contact-intro {
+  font-size: 14px;
+  color: #666;
+  line-height: 1.6;
+}
+
+.contact-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.contact-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px;
+  background: #f9f9f9;
+  border-radius: 8px;
+}
+
+.contact-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.contact-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  color: #333;
+}
+
+.github-icon {
+  width: 1em;
+  height: 1em;
+}
+
+.contact-value {
+  font-size: 13px;
+  color: #666;
+}
+
+/* 群二维码 */
+.qrcode-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 20px;
+  background: #f9f9f9;
+  border-radius: 12px;
+}
+
+.qrcode-wrapper {
+  width: 160px;
+  height: 160px;
+  background: #fff;
+  border-radius: 8px;
+  padding: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+.qrcode-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.qrcode-hint {
+  margin-top: 12px;
+  font-size: 13px;
+  color: #666;
 }
 
 /* 过渡动画 */
