@@ -40,9 +40,17 @@ const globalOpenFile = async () => {
 
     if (selected) {
       const { useSubtitleStore } = await import('./stores/subtitle')
+      const { useConfigStore } = await import('./stores/config')
       const store = useSubtitleStore()
-      const srtFile = await invoke('read_srt', { filePath: selected })
+      const configStore = useConfigStore()
+      const srtFile = await invoke('read_srt', { filePath: selected }) as any
       await store.loadSRTFile(srtFile)
+
+      // 添加到最近文件列表
+      configStore.addRecentFile(selected as string)
+      
+      // 更新菜单
+      await updateRecentFilesMenu()
 
       // 如果当前不在编辑器页面，导航到编辑器
       if (router.currentRoute.value.path !== '/editor') {
@@ -119,12 +127,75 @@ const globalBatchRemovePunctuation = async () => {
   }
 }
 
+// 全局清除最近文件函数
+const globalClearRecentFiles = async () => {
+  try {
+    const { useConfigStore } = await import('./stores/config')
+    const configStore = useConfigStore()
+    configStore.clearRecentFiles()
+    // 更新菜单
+    await invoke('update_recent_files_menu', { files: [] })
+  } catch (error) {
+    // 处理失败，静默处理
+  }
+}
+
+// 全局打开最近文件函数
+const globalOpenRecentFile = async (index: number) => {
+  try {
+    const { useConfigStore } = await import('./stores/config')
+    const { useSubtitleStore } = await import('./stores/subtitle')
+    const configStore = useConfigStore()
+    const subtitleStore = useSubtitleStore()
+    
+    const recentFile = configStore.recentFiles[index]
+    if (!recentFile) return
+    
+    const srtFile = await invoke('read_srt', { filePath: recentFile.path }) as any
+    await subtitleStore.loadSRTFile(srtFile)
+    
+    // 更新最近文件列表（将此文件移到最前）
+    configStore.addRecentFile(recentFile.path)
+    
+    // 更新菜单
+    await updateRecentFilesMenu()
+    
+    // 如果当前不在编辑器页面，导航到编辑器
+    if (router.currentRoute.value.path !== '/editor') {
+      router.push('/editor')
+    }
+  } catch (error) {
+    // 处理失败，静默处理
+    console.error('Failed to open recent file:', error)
+  }
+}
+
+// 更新最近文件菜单
+const updateRecentFilesMenu = async () => {
+  try {
+    const { useConfigStore } = await import('./stores/config')
+    const configStore = useConfigStore()
+    
+    const files = configStore.recentFiles.map(f => ({
+      path: f.path,
+      name: f.name,
+    }))
+    
+    await invoke('update_recent_files_menu', { files })
+  } catch (error) {
+    // 更新菜单失败，静默处理
+  }
+}
+
 // 将全局函数暴露到 window 对象
 ;(window as any).__globalOpenFile = globalOpenFile
 ;(window as any).__globalSaveFile = globalSaveFile
 ;(window as any).__globalBatchAddCJKSpaces = globalBatchAddCJKSpaces
 ;(window as any).__globalBatchRemoveHTML = globalBatchRemoveHTML
 ;(window as any).__globalBatchRemovePunctuation = globalBatchRemovePunctuation
+;(window as any).__globalClearRecentFiles = globalClearRecentFiles
+;(window as any).__globalOpenRecentFile = globalOpenRecentFile
+;(window as any).__updateRecentFilesMenu = updateRecentFilesMenu
 
 // 全局菜单事件监听器（在应用启动时注册）
 listen<void>('menu:open-file', async () => {
@@ -155,3 +226,8 @@ document.addEventListener('keydown', (e: KeyboardEvent) => {
 }, true)
 
 app.mount('#app')
+
+// 应用启动后初始化最近文件菜单
+setTimeout(async () => {
+  await updateRecentFilesMenu()
+}, 100)

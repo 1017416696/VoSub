@@ -331,6 +331,14 @@ const handleOpenFile = async () => {
       const srtFile = await invoke<SRTFile>('read_srt', { filePath: selected })
       await subtitleStore.loadSRTFile(srtFile)
 
+      // 添加到最近文件列表
+      configStore.addRecentFile(selected as string)
+      
+      // 更新菜单
+      if ((window as any).__updateRecentFilesMenu) {
+        await (window as any).__updateRecentFilesMenu()
+      }
+
       // 选中第一条字幕
       if (subtitleStore.entries.length > 0) {
         selectedEntryId.value = subtitleStore.entries[0]?.id ?? null

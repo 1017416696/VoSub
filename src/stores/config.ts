@@ -2,6 +2,16 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { EditorConfig, KeyBinding } from '@/types/subtitle'
 
+// 最近文件项
+export interface RecentFile {
+  path: string
+  name: string
+  lastOpened: number // timestamp
+}
+
+// 最大最近文件数量
+const MAX_RECENT_FILES = 10
+
 export const useConfigStore = defineStore('config', () => {
   // 编辑器配置
   const config = ref<EditorConfig>({
@@ -13,6 +23,9 @@ export const useConfigStore = defineStore('config', () => {
     language: 'zh-CN',
     newSubtitleDuration: 3,
   })
+
+  // 最近打开的文件列表
+  const recentFiles = ref<RecentFile[]>([])
 
   // 快捷键绑定
   const keyBindings = ref<KeyBinding[]>([
@@ -58,6 +71,44 @@ export const useConfigStore = defineStore('config', () => {
         console.error('Failed to load config:', error)
       }
     }
+    // 加载最近文件列表
+    const savedRecentFiles = localStorage.getItem('srt-editor-recent-files')
+    if (savedRecentFiles) {
+      try {
+        recentFiles.value = JSON.parse(savedRecentFiles)
+      } catch (error) {
+        console.error('Failed to load recent files:', error)
+      }
+    }
+  }
+
+  // 添加最近文件
+  const addRecentFile = (filePath: string) => {
+    const fileName = filePath.split('/').pop() || filePath.split('\\').pop() || filePath
+    
+    // 移除已存在的相同路径
+    recentFiles.value = recentFiles.value.filter(f => f.path !== filePath)
+    
+    // 添加到列表开头
+    recentFiles.value.unshift({
+      path: filePath,
+      name: fileName,
+      lastOpened: Date.now(),
+    })
+    
+    // 限制数量
+    if (recentFiles.value.length > MAX_RECENT_FILES) {
+      recentFiles.value = recentFiles.value.slice(0, MAX_RECENT_FILES)
+    }
+    
+    // 保存到本地存储
+    localStorage.setItem('srt-editor-recent-files', JSON.stringify(recentFiles.value))
+  }
+
+  // 清空最近文件
+  const clearRecentFiles = () => {
+    recentFiles.value = []
+    localStorage.removeItem('srt-editor-recent-files')
   }
 
   // 初始化时加载配置
@@ -91,8 +142,11 @@ export const useConfigStore = defineStore('config', () => {
     config,
     keyBindings,
     keyboardShortcuts,
+    recentFiles,
     updateConfig,
     saveConfig,
     loadConfig,
+    addRecentFile,
+    clearRecentFiles,
   }
 })

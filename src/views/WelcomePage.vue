@@ -9,11 +9,13 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Document, Headset } from '@element-plus/icons-vue'
 import { useSubtitleStore } from '@/stores/subtitle'
 import { useAudioStore } from '@/stores/audio'
+import { useConfigStore } from '@/stores/config'
 import type { SRTFile, AudioFile } from '@/types/subtitle'
 
 const router = useRouter()
 const subtitleStore = useSubtitleStore()
 const audioStore = useAudioStore()
+const configStore = useConfigStore()
 
 // 检测操作系统
 const isMac = computed(() => {
@@ -156,6 +158,14 @@ const processFiles = async ({
         await subtitleStore.loadSRTFile(srtFile)
         droppedFiles.value.srt = srtPath.split('/').pop() || srtPath
         srtLoaded = true
+        
+        // 添加到最近文件列表
+        configStore.addRecentFile(srtPath)
+        
+        // 更新菜单
+        if ((window as any).__updateRecentFilesMenu) {
+          await (window as any).__updateRecentFilesMenu()
+        }
       } catch (error) {
         await ElMessageBox.alert(
           `加载 SRT 文件失败：${error instanceof Error ? error.message : '未知错误'}`,

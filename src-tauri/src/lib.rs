@@ -80,6 +80,126 @@ fn trigger_open_file(window: tauri::Window) -> Result<(), String> {
     window.emit("menu:open-file", ()).map_err(|e| e.to_string())
 }
 
+/// 最近文件信息
+#[derive(serde::Deserialize, Clone)]
+struct RecentFileInfo {
+    path: String,
+    name: String,
+}
+
+/// 更新最近文件菜单
+#[tauri::command]
+fn update_recent_files_menu(app_handle: tauri::AppHandle, files: Vec<RecentFileInfo>) -> Result<(), String> {
+    use tauri::menu::{MenuBuilder, SubmenuBuilder};
+    
+    // 获取当前菜单
+    if let Some(_window) = app_handle.get_webview_window("main") {
+        // 创建新的最近文件子菜单
+        let mut recent_menu_builder = SubmenuBuilder::new(&app_handle, "打开最近的文件");
+        
+        if files.is_empty() {
+            recent_menu_builder = recent_menu_builder.text("no-recent", "无最近文件");
+        } else {
+            for (index, file) in files.iter().enumerate() {
+                let menu_id = format!("recent-{}", index);
+                recent_menu_builder = recent_menu_builder.text(&menu_id, &file.name);
+            }
+        }
+        
+        recent_menu_builder = recent_menu_builder
+            .separator()
+            .text("clear-recent", "清除最近文件");
+        
+        let recent_menu = recent_menu_builder.build().map_err(|e| e.to_string())?;
+        
+        // 重建整个菜单
+        #[cfg(target_os = "macos")]
+        {
+            use tauri::menu::PredefinedMenuItem;
+            
+            let app_menu = SubmenuBuilder::new(&app_handle, "SRT Editor")
+                .text("about", "关于 SRT Editor")
+                .separator()
+                .text("quit", "退出 SRT Editor")
+                .build()
+                .map_err(|e| e.to_string())?;
+
+            let file_menu = SubmenuBuilder::new(&app_handle, "文件")
+                .text("open", "打开\t⌘ O")
+                .item(&recent_menu)
+                .text("save", "保存\t⌘ S")
+                .separator()
+                .text("close", "关闭窗口")
+                .build()
+                .map_err(|e| e.to_string())?;
+
+            let edit_menu = SubmenuBuilder::new(&app_handle, "编辑")
+                .item(&PredefinedMenuItem::undo(&app_handle, Some("撤销")).map_err(|e| e.to_string())?)
+                .item(&PredefinedMenuItem::redo(&app_handle, Some("重做")).map_err(|e| e.to_string())?)
+                .separator()
+                .item(&PredefinedMenuItem::cut(&app_handle, Some("剪切")).map_err(|e| e.to_string())?)
+                .item(&PredefinedMenuItem::copy(&app_handle, Some("复制")).map_err(|e| e.to_string())?)
+                .item(&PredefinedMenuItem::paste(&app_handle, Some("粘贴")).map_err(|e| e.to_string())?)
+                .item(&PredefinedMenuItem::select_all(&app_handle, Some("全选")).map_err(|e| e.to_string())?)
+                .separator()
+                .text("batch-add-cjk-spaces", "批量添加中英文空格")
+                .text("batch-remove-html", "批量移除HTML标签")
+                .text("batch-remove-punctuation", "批量删除标点符号")
+                .build()
+                .map_err(|e| e.to_string())?;
+
+            let menu = MenuBuilder::new(&app_handle)
+                .item(&app_menu)
+                .item(&file_menu)
+                .item(&edit_menu)
+                .build()
+                .map_err(|e| e.to_string())?;
+
+            app_handle.set_menu(menu).map_err(|e| e.to_string())?;
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            use tauri::menu::PredefinedMenuItem;
+            
+            let file_menu = SubmenuBuilder::new(&app_handle, "文件")
+                .text("open", "打开\tCtrl+O")
+                .item(&recent_menu)
+                .text("save", "保存\tCtrl+S")
+                .separator()
+                .text("close", "关闭窗口")
+                .build()
+                .map_err(|e| e.to_string())?;
+
+            let edit_menu = SubmenuBuilder::new(&app_handle, "编辑")
+                .item(&PredefinedMenuItem::undo(&app_handle, Some("撤销")).map_err(|e| e.to_string())?)
+                .item(&PredefinedMenuItem::redo(&app_handle, Some("重做")).map_err(|e| e.to_string())?)
+                .separator()
+                .item(&PredefinedMenuItem::cut(&app_handle, Some("剪切")).map_err(|e| e.to_string())?)
+                .item(&PredefinedMenuItem::copy(&app_handle, Some("复制")).map_err(|e| e.to_string())?)
+                .item(&PredefinedMenuItem::paste(&app_handle, Some("粘贴")).map_err(|e| e.to_string())?)
+                .item(&PredefinedMenuItem::select_all(&app_handle, Some("全选")).map_err(|e| e.to_string())?)
+                .separator()
+                .text("batch-add-cjk-spaces", "批量添加中英文空格")
+                .text("batch-remove-html", "批量移除HTML标签")
+                .text("batch-remove-punctuation", "批量删除标点符号")
+                .build()
+                .map_err(|e| e.to_string())?;
+
+            let menu = MenuBuilder::new(&app_handle)
+                .item(&file_menu)
+                .item(&edit_menu)
+                .build()
+                .map_err(|e| e.to_string())?;
+
+            // 使用 app_handle.set_menu 而不是 window.set_menu
+            app_handle.set_menu(menu).map_err(|e| e.to_string())?;
+        }
+    }
+    
+    Ok(())
+}
+
 /// Simple base64 encoding function
 fn base64_encode(data: &[u8]) -> String {
     const CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -124,9 +244,17 @@ pub fn run() {
                     .text("quit", "退出 SRT Editor")
                     .build()?;
 
+                // 创建 打开最近的文件 子菜单
+                let recent_menu = SubmenuBuilder::new(app, "打开最近的文件")
+                    .text("no-recent", "无最近文件")
+                    .separator()
+                    .text("clear-recent", "清除最近文件")
+                    .build()?;
+
                 // 创建 文件 菜单（macOS 使用 Cmd）
                 let file_menu = SubmenuBuilder::new(app, "文件")
                     .text("open", "打开\t⌘ O")
+                    .item(&recent_menu)
                     .text("save", "保存\t⌘ S")
                     .separator()
                     .text("close", "关闭窗口")
@@ -160,9 +288,17 @@ pub fn run() {
             // Windows 配置
             #[cfg(target_os = "windows")]
             {
+                // 创建 打开最近的文件 子菜单
+                let recent_menu = SubmenuBuilder::new(app, "打开最近的文件")
+                    .text("no-recent", "无最近文件")
+                    .separator()
+                    .text("clear-recent", "清除最近文件")
+                    .build()?;
+
                 // 创建 文件 菜单（Windows 使用 Ctrl）
                 let file_menu = SubmenuBuilder::new(app, "文件")
                     .text("open", "打开\tCtrl+O")
+                    .item(&recent_menu)
                     .text("save", "保存\tCtrl+S")
                     .separator()
                     .text("close", "关闭窗口")
@@ -255,6 +391,32 @@ pub fn run() {
                             let _ = window.eval(js_code);
                         }
                     }
+                    "clear-recent" => {
+                        if let Some(window) = app_handle.get_webview_window("main") {
+                            let js_code = r#"
+                                (async () => {
+                                    if (window.__globalClearRecentFiles && typeof window.__globalClearRecentFiles === 'function') {
+                                        await window.__globalClearRecentFiles();
+                                    }
+                                })();
+                            "#;
+                            let _ = window.eval(js_code);
+                        }
+                    }
+                    id if id.starts_with("recent-") => {
+                        // 处理最近文件点击
+                        if let Some(window) = app_handle.get_webview_window("main") {
+                            let index = id.strip_prefix("recent-").unwrap_or("0");
+                            let js_code = format!(r#"
+                                (async () => {{
+                                    if (window.__globalOpenRecentFile && typeof window.__globalOpenRecentFile === 'function') {{
+                                        await window.__globalOpenRecentFile({});
+                                    }}
+                                }})();
+                            "#, index);
+                            let _ = window.eval(&js_code);
+                        }
+                    }
                     _ => {}
                 }
             });
@@ -274,7 +436,7 @@ pub fn run() {
                 .build(),
         )
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![greet, read_srt, write_srt, read_audio_file, generate_audio_waveform, trigger_open_file])
+        .invoke_handler(tauri::generate_handler![greet, read_srt, write_srt, read_audio_file, generate_audio_waveform, trigger_open_file, update_recent_files_menu])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
