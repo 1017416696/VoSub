@@ -11,7 +11,7 @@ import { useConfigStore } from '@/stores/config'
 import { timeStampToMs } from '@/utils/time'
 import type { SRTFile, AudioFile, TimeStamp } from '@/types/subtitle'
 import WaveformViewer from '@/components/WaveformViewer.vue'
-import { DocumentCopy, VideoPlay, Delete, PriceTag, Document, Setting } from '@element-plus/icons-vue'
+import { DocumentCopy, VideoPlay, Delete, PriceTag, Document, Setting, Plus } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 // Debounce helper function
@@ -819,6 +819,12 @@ const openSettings = () => {
   ElMessage.info('设置功能开发中...')
 }
 
+// 打开字幕功能
+const openSubtitle = () => {
+  // TODO: 实现字幕功能
+  ElMessage.info('字幕功能开发中...')
+}
+
 // 返回欢迎页
 const goBack = async () => {
   // 清理音频状态
@@ -1034,6 +1040,10 @@ const handleKeydown = (e: KeyboardEvent) => {
   <div class="editor-page">
     <!-- 标题栏区域（可拖拽） -->
     <div class="titlebar" @mousedown.left="onTitlebarMousedown">
+      <!-- 左侧字幕按钮（紧贴红绿灯右侧） -->
+      <button class="subtitle-btn" @click="openSubtitle" @mousedown.stop title="添加字幕">
+        <el-icon><Plus /></el-icon>
+      </button>
       <span class="titlebar-title">SRT 字幕编辑器</span>
       <button class="settings-btn" @click="openSettings" @mousedown.stop>
         <el-icon><Setting /></el-icon>
@@ -2207,8 +2217,7 @@ mark {
   width: 26px;
   height: 26px;
   background: transparent;
-  border: 1px solid #e5e7eb;
-  border-radius: 50%;
+  border: none;
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -2217,13 +2226,40 @@ mark {
   app-region: no-drag;
 }
 
-.settings-btn:hover {
-  background: #f5f5f5;
-  border-color: #d1d5db;
+.settings-btn:hover .el-icon {
+  color: #409eff;
 }
 
 .settings-btn .el-icon {
-  font-size: 14px;
+  font-size: 16px;
+  color: #666;
+  pointer-events: none;
+}
+
+/* 字幕按钮（紧贴红绿灯右侧） */
+.subtitle-btn {
+  position: absolute;
+  left: 80px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 26px;
+  height: 26px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+.subtitle-btn:hover .el-icon {
+  color: #409eff;
+}
+
+.subtitle-btn .el-icon {
+  font-size: 16px;
   color: #666;
   pointer-events: none;
 }
