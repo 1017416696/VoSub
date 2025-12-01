@@ -46,6 +46,7 @@ const editingStartTime = ref('')
 const editingEndTime = ref('')
 const subtitleListContainer = ref<HTMLElement | null>(null)
 const searchInputRef = ref<InstanceType<typeof HTMLInputElement> | null>(null)
+const replaceInputRef = ref<InstanceType<typeof HTMLInputElement> | null>(null)
 const textareaInputRef = ref<any>(null) // el-input 的 ref
 const subtitleItemRefs: Record<number, HTMLElement | null> = {}
 const isUserEditing = ref(false) // 标记是否是用户在编辑
@@ -1022,6 +1023,9 @@ const handleKeydown = (e: KeyboardEvent) => {
   // 检查是否在搜索框内
   const isInSearchInput = target === searchInputRef.value?.$el?.querySelector('input')
 
+  // 检查是否在替换框内
+  const isInReplaceInput = target === replaceInputRef.value?.$el?.querySelector('input')
+
   const shortcuts = configStore.keyboardShortcuts
   const pressedKey = buildKeyString(e)
 
@@ -1037,11 +1041,22 @@ const handleKeydown = (e: KeyboardEvent) => {
       // 如果在搜索输入框内按 Cmd+F/Ctrl+F，保持焦点不变
       e.preventDefault()
     } else if (e.key === 'Escape') {
-      // 在输入框内按 ESC 时，清除搜索文本并失焦（如果在搜索框）
+      // 在输入框内按 ESC 时，清除搜索和替换文本并失焦
       e.preventDefault()
       if (isInSearchInput) {
-        searchText.value = ''
+        // 当搜索和替换框都有内容时，同时清空两个输入框
+        if (searchText.value && replaceText.value) {
+          searchText.value = ''
+          replaceText.value = ''
+        } else {
+          searchText.value = ''
+        }
         searchInputRef.value?.blur()
+      } else if (isInReplaceInput) {
+        // 在替换框按 ESC 时，清空搜索和替换框
+        searchText.value = ''
+        replaceText.value = ''
+        replaceInputRef.value?.blur()
       }
     } else if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && isInSearchInput) {
       // 在搜索框内按上下箭头时，失焦并导航字幕列表
@@ -1064,6 +1079,15 @@ const handleKeydown = (e: KeyboardEvent) => {
   } else if (shortcuts.find === pressedKey) {
     // Command+F 或 Ctrl+F：聚焦搜索输入框
     e.preventDefault()
+    if (searchInputRef.value) {
+      nextTick(() => {
+        searchInputRef.value?.focus()
+      })
+    }
+  } else if (pressedKey === 'Cmd+r' || pressedKey === 'Ctrl+r') {
+    // Command+R 或 Ctrl+R：展示替换框并聚焦搜索输入框
+    e.preventDefault()
+    showReplace.value = true
     if (searchInputRef.value) {
       nextTick(() => {
         searchInputRef.value?.focus()
@@ -1251,6 +1275,7 @@ const handleKeydown = (e: KeyboardEvent) => {
           <div v-if="showReplace" class="replace-row">
             <div class="replace-spacer"></div>
             <el-input
+              ref="replaceInputRef"
               v-model="replaceText"
               placeholder="替换为..."
               clearable
