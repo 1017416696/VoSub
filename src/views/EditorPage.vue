@@ -1314,15 +1314,6 @@ const handleKeydown = (e: KeyboardEvent) => {
   <div class="editor-page">
     <!-- 标题栏区域（可拖拽） -->
     <div class="titlebar" @mousedown.left="onTitlebarMousedown">
-      <button
-        class="scissor-btn"
-        :class="{ active: isScissorMode }"
-        @click="handleScissor"
-        @mousedown.stop
-        title="分割字幕"
-      >
-        <el-icon><Scissor /></el-icon>
-      </button>
       <span class="titlebar-title">SRT 字幕编辑器</span>
     </div>
 
@@ -1456,6 +1447,14 @@ const handleKeydown = (e: KeyboardEvent) => {
             title="搜索字幕"
           >
             <el-icon><Search /></el-icon>
+          </button>
+          <button
+            class="sidebar-btn"
+            :class="{ active: isScissorMode }"
+            @click="handleScissor"
+            title="分割字幕 (X)"
+          >
+            <el-icon><Scissor /></el-icon>
           </button>
         </div>
         <div class="sidebar-bottom">
@@ -2051,44 +2050,6 @@ const handleKeydown = (e: KeyboardEvent) => {
 
 .sidebar-btn.active .el-icon {
   color: #3b82f6;
-}
-
-/* 剪刀按钮（标题栏） */
-.scissor-btn {
-  position: absolute;
-  left: 80px;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 26px;
-  height: 26px;
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 4px;
-  -webkit-app-region: no-drag;
-  app-region: no-drag;
-  transition: all 0.2s ease;
-}
-
-.scissor-btn:hover .el-icon {
-  color: #409eff;
-}
-
-.scissor-btn.active {
-  background: #409eff;
-}
-
-.scissor-btn.active .el-icon {
-  color: #fff;
-}
-
-.scissor-btn .el-icon {
-  font-size: 16px;
-  color: #666;
-  pointer-events: none;
 }
 
 /* 左侧字幕列表 */
