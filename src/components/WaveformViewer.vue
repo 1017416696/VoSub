@@ -143,6 +143,8 @@ const emit = defineEmits<{
   selectSubtitles: [ids: number[]]
   doubleClickSubtitle: [id: number]
   splitSubtitle: [id: number, splitTimeMs: number]
+  dragStart: [ids: number[]]
+  dragEnd: []
 }>()
 
 // Refs
@@ -657,6 +659,8 @@ const handleSubtitleMouseDown = (event: MouseEvent, subtitle: SubtitleEntry) => 
     draggingSelectedSubtitles.value.forEach(s => {
       dragStartTimes.value.set(s.id, timestampToSeconds(s.startTime))
     })
+    // 通知开始拖动，记录原始时间
+    emit('dragStart', draggingSelectedSubtitles.value.map(s => s.id))
   } else {
     // 单个拖拽
     selectedSubtitleIds.value.clear()
@@ -664,6 +668,8 @@ const handleSubtitleMouseDown = (event: MouseEvent, subtitle: SubtitleEntry) => 
     emit('selectSubtitles', [subtitle.id])
     draggingSubtitle.value = subtitle
     dragStartTime.value = timestampToSeconds(subtitle.startTime)
+    // 通知开始拖动，记录原始时间
+    emit('dragStart', [subtitle.id])
   }
 
   dragStartX.value = event.clientX
@@ -717,6 +723,9 @@ const handleSubtitleDrag = (event: MouseEvent) => {
 }
 
 const handleSubtitleDragEnd = () => {
+  // 通知拖动结束，记录历史
+  emit('dragEnd')
+  
   draggingSubtitle.value = null
   draggingSelectedSubtitles.value = []
   dragStartTimes.value.clear()
@@ -730,6 +739,8 @@ const handleResizeStart = (event: MouseEvent, subtitle: SubtitleEntry, side: 'le
   resizingSubtitle.value = { subtitle, side }
   dragStartX.value = event.clientX
   currentSubtitleId.value = subtitle.id
+  // 通知开始拖动，记录原始时间
+  emit('dragStart', [subtitle.id])
 
   document.addEventListener('mousemove', handleResize)
   document.addEventListener('mouseup', handleResizeEnd)
@@ -759,6 +770,9 @@ const handleResize = (event: MouseEvent) => {
 }
 
 const handleResizeEnd = () => {
+  // 通知拖动结束，记录历史
+  emit('dragEnd')
+  
   resizingSubtitle.value = null
   currentSubtitleId.value = null
   document.removeEventListener('mousemove', handleResize)

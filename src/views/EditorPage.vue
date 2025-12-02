@@ -484,24 +484,50 @@ const handleAddEntry = () => {
 const handleDeleteEntry = async () => {
   if (!currentEntry.value) return
 
-  // 如果正在播放，暂停
-  if (audioStore.playerState.isPlaying) {
-    audioStore.pause()
-  }
-
   const currentId = currentEntry.value.id
-  const currentIndex = subtitleStore.entries.findIndex((e) => e.id === currentId)
 
-  subtitleStore.deleteEntry(currentId)
+  try {
+    // 显示确认对话框
+    await ElMessageBox.confirm(
+      `删除后无法恢复，确定删除字幕 #${currentId} 吗？`,
+      '删除确认',
+      {
+        confirmButtonText: '删除',
+        cancelButtonText: '取消',
+        type: 'warning',
+      }
+    )
 
-  // 选中下一条或上一条字幕
-  if (subtitleStore.entries.length > 0) {
-    const nextEntry = subtitleStore.entries[currentIndex] || subtitleStore.entries[currentIndex - 1]
-    if (nextEntry) {
-      selectedEntryId.value = nextEntry.id
+    // 如果正在播放，暂停
+    if (audioStore.playerState.isPlaying) {
+      audioStore.pause()
     }
-  } else {
-    selectedEntryId.value = null
+
+    const currentIndex = subtitleStore.entries.findIndex((e) => e.id === currentId)
+
+    subtitleStore.deleteEntry(currentId)
+
+    // 保存文件
+    if (subtitleStore.currentFilePath) {
+      await subtitleStore.saveToFile()
+    }
+
+    // 选中下一条或上一条字幕
+    if (subtitleStore.entries.length > 0) {
+      const nextEntry = subtitleStore.entries[currentIndex] || subtitleStore.entries[currentIndex - 1]
+      if (nextEntry) {
+        selectedEntryId.value = nextEntry.id
+      }
+    } else {
+      selectedEntryId.value = null
+    }
+
+    ElMessage.success({
+      message: '已删除',
+      duration: 1500,
+    })
+  } catch {
+    // 用户点击了取消
   }
 }
 
@@ -556,7 +582,7 @@ const deleteSubtitleItem = async (id: number) => {
   try {
     // 显示确认对话框
     await ElMessageBox.confirm(
-      `确定删除字幕 #${id} 吗？`,
+      `删除后无法恢复，确定删除字幕 #${id} 吗？`,
       '删除确认',
       {
         confirmButtonText: '删除',
@@ -752,11 +778,11 @@ const handleTimeChange = async (type: 'start' | 'end') => {
       audioStore.pause()
     }
 
-    // 更新时间
+    // 更新时间（输入框修改，需要记录历史）
     if (type === 'start') {
-      subtitleStore.updateEntryTime(currentEntry.value.id, newTime, currentEntry.value.endTime)
+      subtitleStore.updateEntryTime(currentEntry.value.id, newTime, undefined, true)
     } else {
-      subtitleStore.updateEntryTime(currentEntry.value.id, currentEntry.value.startTime, newTime)
+      subtitleStore.updateEntryTime(currentEntry.value.id, undefined, newTime, true)
     }
 
     // 保存文件
@@ -812,12 +838,12 @@ const adjustTime = async (type: 'start' | 'end', deltaMs: number) => {
       milliseconds
     }
 
-    // 更新时间
+    // 更新时间（微调按钮，需要记录历史）
     if (type === 'start') {
-      subtitleStore.updateEntryTime(currentEntry.value.id, newTime, currentEntry.value.endTime)
+      subtitleStore.updateEntryTime(currentEntry.value.id, newTime, undefined, true)
       editingStartTime.value = subtitleStore.formatTimeStamp(newTime)
     } else {
-      subtitleStore.updateEntryTime(currentEntry.value.id, currentEntry.value.startTime, newTime)
+      subtitleStore.updateEntryTime(currentEntry.value.id, undefined, newTime, true)
       editingEndTime.value = subtitleStore.formatTimeStamp(newTime)
     }
 
@@ -890,6 +916,16 @@ const handleSubtitlesUpdate = (updates: Array<{ id: number; startTime: TimeStamp
 const handleSubtitlesSelect = (ids: number[]) => {
   // 可以在这里处理选择变化，比如更新 UI
   // 目前主要用于多选状态同步
+}
+
+// 处理拖动开始（记录原始时间）
+const handleDragStart = (ids: number[]) => {
+  subtitleStore.startDragging(ids)
+}
+
+// 处理拖动结束（记录历史）
+const handleDragEnd = () => {
+  subtitleStore.endDragging()
 }
 
 // 处理波形下字幕块的双击 - 跳转到编辑区并聚焦
@@ -1262,6 +1298,14 @@ const handleKeydown = (e: KeyboardEvent) => {
     // Command+逗号 或 Ctrl+逗号：打开设置
     e.preventDefault()
     openSettings()
+  } else if (shortcuts.undo === pressedKey) {
+    // 撤销
+    e.preventDefault()
+    subtitleStore.undo()
+  } else if (shortcuts.redo === pressedKey) {
+    // 重做
+    e.preventDefault()
+    subtitleStore.redo()
   }
 }
 </script>
@@ -1367,6 +1411,8 @@ const handleKeydown = (e: KeyboardEvent) => {
         @select-subtitles="handleSubtitlesSelect"
         @double-click-subtitle="handleWaveformDoubleClick"
         @split-subtitle="handleSplitSubtitle"
+        @drag-start="handleDragStart"
+        @drag-end="handleDragEnd"
       />
     </div>
 

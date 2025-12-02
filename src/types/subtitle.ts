@@ -66,6 +66,7 @@ export enum HistoryActionType {
   TIME_EDIT = 'TIME_EDIT', // 时间编辑
   DELETE = 'DELETE', // 删除字幕
   ADD = 'ADD', // 新增字幕
+  SPLIT = 'SPLIT', // 分割字幕
   BATCH = 'BATCH', // 批量操作
 }
 
@@ -79,6 +80,9 @@ export interface HistoryAction {
   before: Partial<SubtitleEntry> // 操作前状态
   after: Partial<SubtitleEntry> // 操作后状态
   description?: string // 操作描述
+  // 分割操作专用字段
+  newEntryId?: number // 分割产生的新字幕 ID
+  newEntry?: Partial<SubtitleEntry> // 分割产生的新字幕数据
 }
 
 /**
