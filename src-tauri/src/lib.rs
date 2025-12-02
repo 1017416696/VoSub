@@ -4,9 +4,12 @@ mod waveform_generator;
 use srt_parser::{read_srt_file, write_srt_file, SRTFile, SubtitleEntry};
 use waveform_generator::{generate_waveform_with_progress, ProgressCallback};
 use std::fs;
+use std::path::PathBuf;
 use tauri::menu::{MenuBuilder, MenuItem, PredefinedMenuItem, SubmenuBuilder};
 use tauri::{Emitter, Manager};
 use tauri_plugin_prevent_default::Flags;
+use tauri_plugin_log::{Target, TargetKind, TimezoneStrategy};
+use log::info;
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
@@ -78,6 +81,49 @@ async fn generate_audio_waveform(
 #[tauri::command]
 fn trigger_open_file(window: tauri::Window) -> Result<(), String> {
     window.emit("menu:open-file", ()).map_err(|e| e.to_string())
+}
+
+/// 获取日志文件路径
+#[tauri::command]
+fn get_log_path(app_handle: tauri::AppHandle) -> Result<String, String> {
+    let log_dir = app_handle.path().app_log_dir().map_err(|e| e.to_string())?;
+    let log_file = log_dir.join("srt-editor.log");
+    Ok(log_file.to_string_lossy().to_string())
+}
+
+/// 在系统文件管理器中显示日志文件
+#[tauri::command]
+fn show_log_in_folder(app_handle: tauri::AppHandle) -> Result<(), String> {
+    let log_dir = app_handle.path().app_log_dir().map_err(|e| e.to_string())?;
+    let log_file = log_dir.join("srt-editor.log");
+    
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg("-R")
+            .arg(&log_file)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg("/select,")
+            .arg(&log_file)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(&log_dir)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    
+    Ok(())
 }
 
 /// 最近文件信息
@@ -340,6 +386,8 @@ pub fn run() {
                 app.set_menu(menu)?;
             }
 
+            info!("应用启动完成");
+
             // 处理菜单事件
             app.on_menu_event(|app_handle, event| {
                 match event.id().0.as_str() {
@@ -453,7 +501,36 @@ pub fn run() {
                 .build(),
         )
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![greet, read_srt, write_srt, read_audio_file, generate_audio_waveform, trigger_open_file, update_recent_files_menu])
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .targets([
+                    // 开发环境输出到控制台
+                    Target::new(TargetKind::Stdout),
+                    // 日志文件，自动存储在系统日志目录
+                    Target::new(TargetKind::LogDir { file_name: Some("srt-editor".into()) }),
+                ])
+                .timezone_strategy(TimezoneStrategy::UseLocal)
+                // 默认只记录 INFO 级别
+                .level(log::LevelFilter::Info)
+                // 我们的应用在开发环境记录 DEBUG
+                .level_for("tauri_app_lib", if cfg!(debug_assertions) {
+                    log::LevelFilter::Debug
+                } else {
+                    log::LevelFilter::Info
+                })
+                // 前端日志在开发环境记录 DEBUG
+                .level_for("webview", if cfg!(debug_assertions) {
+                    log::LevelFilter::Debug
+                } else {
+                    log::LevelFilter::Info
+                })
+                // 过滤掉第三方库的 DEBUG 日志
+                .level_for("symphonia_core", log::LevelFilter::Warn)
+                .level_for("symphonia_bundle_mp3", log::LevelFilter::Warn)
+                .level_for("symphonia_metadata", log::LevelFilter::Warn)
+                .build(),
+        )
+        .invoke_handler(tauri::generate_handler![greet, read_srt, write_srt, read_audio_file, generate_audio_waveform, trigger_open_file, update_recent_files_menu, get_log_path, show_log_in_folder])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

@@ -9,10 +9,16 @@ import './assets/main.css'
 import { listen } from '@tauri-apps/api/event'
 import { open } from '@tauri-apps/plugin-dialog'
 import { invoke } from '@tauri-apps/api/core'
+import logger, { initLogger } from './utils/logger'
 
 if (process.env.NODE_ENV === 'development') {
   devtools.connect('http://localhost', 8098)
 }
+
+// 初始化日志系统
+initLogger().then(() => {
+  logger.info('前端应用初始化')
+})
 
 const app = createApp(App)
 const pinia = createPinia()
@@ -39,12 +45,20 @@ const globalOpenFile = async () => {
     })
 
     if (selected) {
+      const loadStartTime = Date.now()
       const { useSubtitleStore } = await import('./stores/subtitle')
       const { useConfigStore } = await import('./stores/config')
       const store = useSubtitleStore()
       const configStore = useConfigStore()
-      const srtFile = await invoke('read_srt', { filePath: selected }) as any
+      const srtFile = (await invoke('read_srt', { filePath: selected })) as any
       await store.loadSRTFile(srtFile)
+
+      const loadDuration = Date.now() - loadStartTime
+      logger.info('打开 SRT 文件', {
+        path: selected,
+        entries: srtFile.entries?.length,
+        loadTime: `${loadDuration}ms`,
+      })
 
       // 添加到最近文件列表
       configStore.addRecentFile(selected as string)
@@ -58,7 +72,7 @@ const globalOpenFile = async () => {
       }
     }
   } catch (error) {
-    // 加载失败，静默处理
+    logger.error('打开文件失败', { error: String(error) })
   }
 }
 
@@ -71,8 +85,9 @@ const globalSaveFile = async () => {
       return
     }
     await store.saveToFile()
+    logger.info('保存文件成功', { path: store.currentFilePath })
   } catch (error) {
-    // 保存失败，静默处理
+    logger.error('保存文件失败', { error: String(error) })
   }
 }
 
@@ -85,11 +100,12 @@ const globalBatchAddCJKSpaces = async () => {
       return
     }
     store.addSpacesBetweenCJKAndAlphanumeric()
+    logger.info('批量添加中英文空格', { entries: store.entries.length })
     if (store.currentFilePath) {
       await store.saveToFile()
     }
   } catch (error) {
-    // 处理失败，静默处理
+    logger.error('批量添加中英文空格失败', { error: String(error) })
   }
 }
 
@@ -102,11 +118,12 @@ const globalBatchRemoveHTML = async () => {
       return
     }
     store.removeHTMLTags()
+    logger.info('批量移除 HTML 标签', { entries: store.entries.length })
     if (store.currentFilePath) {
       await store.saveToFile()
     }
   } catch (error) {
-    // 处理失败，静默处理
+    logger.error('批量移除 HTML 标签失败', { error: String(error) })
   }
 }
 
@@ -119,11 +136,12 @@ const globalBatchRemovePunctuation = async () => {
       return
     }
     store.removePunctuation()
+    logger.info('批量删除标点符号', { entries: store.entries.length })
     if (store.currentFilePath) {
       await store.saveToFile()
     }
   } catch (error) {
-    // 处理失败，静默处理
+    logger.error('批量删除标点符号失败', { error: String(error) })
   }
 }
 
@@ -143,16 +161,24 @@ const globalClearRecentFiles = async () => {
 // 全局打开最近文件函数
 const globalOpenRecentFile = async (index: number) => {
   try {
+    const loadStartTime = Date.now()
     const { useConfigStore } = await import('./stores/config')
     const { useSubtitleStore } = await import('./stores/subtitle')
     const configStore = useConfigStore()
     const subtitleStore = useSubtitleStore()
-    
+
     const recentFile = configStore.recentFiles[index]
     if (!recentFile) return
-    
-    const srtFile = await invoke('read_srt', { filePath: recentFile.path }) as any
+
+    const srtFile = (await invoke('read_srt', { filePath: recentFile.path })) as any
     await subtitleStore.loadSRTFile(srtFile)
+
+    const loadDuration = Date.now() - loadStartTime
+    logger.info('打开最近文件', {
+      path: recentFile.path,
+      entries: srtFile.entries?.length,
+      loadTime: `${loadDuration}ms`,
+    })
     
     // 更新最近文件列表（将此文件移到最前）
     configStore.addRecentFile(recentFile.path)
@@ -165,8 +191,7 @@ const globalOpenRecentFile = async (index: number) => {
       router.push('/editor')
     }
   } catch (error) {
-    // 处理失败，静默处理
-    console.error('Failed to open recent file:', error)
+    logger.error('打开最近文件失败', { error: String(error) })
   }
 }
 

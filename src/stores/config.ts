@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { EditorConfig, KeyBinding } from '@/types/subtitle'
+import logger from '@/utils/logger'
 
 // 最近文件项
 export interface RecentFile {
@@ -68,8 +69,9 @@ export const useConfigStore = defineStore('config', () => {
       try {
         const parsed = JSON.parse(saved)
         config.value = { ...config.value, ...parsed }
+        logger.debug('配置加载完成')
       } catch (error) {
-        console.error('Failed to load config:', error)
+        logger.error('配置加载失败', { error: String(error) })
       }
     }
     // 加载最近文件列表
@@ -77,8 +79,9 @@ export const useConfigStore = defineStore('config', () => {
     if (savedRecentFiles) {
       try {
         recentFiles.value = JSON.parse(savedRecentFiles)
+        logger.debug('最近文件列表加载完成', { count: recentFiles.value.length })
       } catch (error) {
-        console.error('Failed to load recent files:', error)
+        logger.error('最近文件列表加载失败', { error: String(error) })
       }
     }
   }

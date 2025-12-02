@@ -4,6 +4,7 @@ import type { AudioFile, PlayerState } from '@/types/subtitle'
 import { Howl } from 'howler'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
+import logger from '@/utils/logger'
 
 export const useAudioStore = defineStore('audio', () => {
   // 状态
@@ -34,6 +35,8 @@ export const useAudioStore = defineStore('audio', () => {
 
   // 加载音频文件
   const loadAudio = async (file: AudioFile) => {
+    const loadStartTime = Date.now()
+    
     // 清理现有音频
     if (howl.value) {
       howl.value.unload()
@@ -79,7 +82,7 @@ export const useAudioStore = defineStore('audio', () => {
       // 启动模拟进度
       startProgressSimulation()
     } catch (error) {
-      console.error('Failed to set up waveform progress listener:', error)
+      logger.error('设置波形进度监听器失败', { error: String(error) })
     }
     
     // 设置音频文件（先清空波形数据）
@@ -122,10 +125,21 @@ export const useAudioStore = defineStore('audio', () => {
             if (howl.value) {
               playerState.value.duration = howl.value.duration()
             }
+            const loadDuration = Date.now() - loadStartTime
+            logger.info('音频加载完成', {
+              path: file.path,
+              duration: howl.value?.duration(),
+              loadTime: `${loadDuration}ms`,
+            })
             resolve()
           },
           onloaderror: (_id, error) => {
-            console.error('Audio load error:', error)
+            const loadDuration = Date.now() - loadStartTime
+            logger.error('音频加载失败', {
+              path: file.path,
+              error: String(error),
+              loadTime: `${loadDuration}ms`,
+            })
             URL.revokeObjectURL(audioUrl)
             reject(new Error(`Failed to load audio: ${error}`))
           },
@@ -146,7 +160,7 @@ export const useAudioStore = defineStore('audio', () => {
           },
         })
       } catch (error) {
-        console.error('Failed to read file:', error)
+        logger.error('读取音频文件失败', { path: file.path, error: String(error) })
         reject(new Error(`Failed to read audio file: ${error}`))
       }
     })
@@ -278,6 +292,8 @@ export const useAudioStore = defineStore('audio', () => {
 
   // 生成波形数据
   const generateWaveform = async (filePath: string) => {
+    const waveformStartTime = Date.now()
+    
     // 确保状态已设置
     if (!isGeneratingWaveform.value) {
       isGeneratingWaveform.value = true
@@ -298,9 +314,20 @@ export const useAudioStore = defineStore('audio', () => {
       
       if (audioFile.value && waveform) {
         audioFile.value.waveform = waveform
+        const waveformDuration = Date.now() - waveformStartTime
+        logger.info('波形生成完成', {
+          path: filePath,
+          samples: waveform.length,
+          generateTime: `${waveformDuration}ms`,
+        })
       }
     } catch (error) {
-      console.error('Waveform generation failed:', error)
+      const waveformDuration = Date.now() - waveformStartTime
+      logger.error('波形生成失败', {
+        path: filePath,
+        error: String(error),
+        generateTime: `${waveformDuration}ms`,
+      })
     } finally {
       // 停止模拟进度定时器
       if (progressSimulationTimer) {

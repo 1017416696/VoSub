@@ -8,8 +8,9 @@ import type {
   TimeStamp,
 } from '@/types/subtitle'
 import { HistoryActionType } from '@/types/subtitle'
-import { timeStampToMs, getDuration } from '@/utils/time'
+import { timeStampToMs } from '@/utils/time'
 import { useConfigStore } from '@/stores/config'
+import logger from '@/utils/logger'
 
 export const useSubtitleStore = defineStore('subtitle', () => {
   // 状态
@@ -149,6 +150,7 @@ export const useSubtitleStore = defineStore('subtitle', () => {
     savedHistoryIndex.value = -1
     detectTimeConflicts()
     assignSubtitleToTracks()
+    logger.info('SRT 文件加载完成', { path: file.path, entries: file.entries.length })
   }
 
   // 根据播放时间获取当前字幕
@@ -331,6 +333,8 @@ export const useSubtitleStore = defineStore('subtitle', () => {
 
     const entry = entries.value[index]
 
+    logger.info('删除字幕', { entryId, text: entry?.text?.substring(0, 30) })
+
     addHistory({
       type: HistoryActionType.DELETE,
       timestamp: Date.now(),
@@ -444,6 +448,8 @@ export const useSubtitleStore = defineStore('subtitle', () => {
 
     detectTimeConflicts()
     assignSubtitleToTracks()
+
+    logger.info('分割字幕', { entryId: index + 1, newEntryId: newId })
 
     return newId
   }
@@ -803,12 +809,6 @@ export const useSubtitleStore = defineStore('subtitle', () => {
     // 调用 Tauri 命令保存文件
     const { invoke } = await import('@tauri-apps/api/core')
 
-    // 将当前的字幕条目写回 SRT 文件
-    const updatedFile: SRTFile = {
-      ...srtFile.value,
-      entries: entries.value,
-    }
-
     try {
       await invoke('write_srt', {
         filePath: srtFile.value.path,
@@ -817,8 +817,9 @@ export const useSubtitleStore = defineStore('subtitle', () => {
 
       // 保存成功后，记录当前历史索引为已保存点
       savedHistoryIndex.value = historyIndex.value
+      logger.info('文件保存成功', { path: srtFile.value.path, entries: entries.value.length })
     } catch (error) {
-      console.error('Failed to save SRT file:', error)
+      logger.error('文件保存失败', { path: srtFile.value.path, error: String(error) })
       throw error
     }
   }

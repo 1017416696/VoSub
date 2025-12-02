@@ -2,8 +2,9 @@
 import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useConfigStore } from '@/stores/config'
-import { Setting, Key, InfoFilled, ChatDotRound, Message } from '@element-plus/icons-vue'
+import { Setting, Key, InfoFilled, ChatDotRound, Message, Document } from '@element-plus/icons-vue'
 import { open } from '@tauri-apps/plugin-shell'
+import { invoke } from '@tauri-apps/api/core'
 
 const props = defineProps<{
   visible: boolean
@@ -16,15 +17,50 @@ const emit = defineEmits<{
 const configStore = useConfigStore()
 
 // 当前选中的菜单项
-const activeMenu = ref<'general' | 'shortcuts' | 'contact' | 'about'>('general')
+const activeMenu = ref<'general' | 'shortcuts' | 'logs' | 'contact' | 'about'>('general')
 
 // 菜单项配置
 const menuItems = [
   { key: 'general', label: '常规设置', icon: Setting },
   { key: 'shortcuts', label: '快捷键列表', icon: Key },
+  { key: 'logs', label: '日志', icon: Document },
   { key: 'contact', label: '联系开发者', icon: ChatDotRound },
   { key: 'about', label: '关于', icon: InfoFilled },
 ] as const
+
+// 日志文件路径
+const logPath = ref('')
+
+// 获取日志文件路径
+const fetchLogPath = async () => {
+  try {
+    logPath.value = await invoke<string>('get_log_path')
+  } catch {
+    logPath.value = '无法获取日志路径'
+  }
+}
+
+// 在 Finder 中显示日志文件
+const showLogInFolder = async () => {
+  try {
+    await invoke('show_log_in_folder')
+  } catch {
+    ElMessage.error('无法打开日志文件位置')
+  }
+}
+
+// 复制日志路径
+const copyLogPath = async () => {
+  try {
+    await navigator.clipboard.writeText(logPath.value)
+    ElMessage.success('已复制日志路径')
+  } catch {
+    ElMessage.error('复制失败')
+  }
+}
+
+// 初始化时获取日志路径
+fetchLogPath()
 
 // 联系方式
 const contactInfo = {
@@ -213,6 +249,32 @@ const appVersion = '0.0.4'
                       class="key-cap"
                     >{{ k }}</kbd>
                   </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 日志 -->
+            <div v-if="activeMenu === 'logs'" class="content-section">
+              <h2 class="section-title">日志</h2>
+              
+              <div class="logs-content">
+                <div class="log-card">
+                  <div class="log-icon">
+                    <el-icon :size="32"><Document /></el-icon>
+                  </div>
+                  <div class="log-info">
+                    <h4>应用日志</h4>
+                    <p>记录关键操作和错误信息，可用于问题排查</p>
+                  </div>
+                </div>
+                
+                <div class="log-actions">
+                  <el-button size="large" @click="showLogInFolder">
+                    打开日志文件
+                  </el-button>
+                  <el-button size="large" @click="copyLogPath">
+                    复制日志路径
+                  </el-button>
                 </div>
               </div>
             </div>
@@ -533,6 +595,52 @@ const appVersion = '0.0.4'
 .copyright {
   font-size: 12px;
   color: #bbb;
+}
+
+/* 日志页面 */
+.logs-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding-top: 40px;
+  gap: 32px;
+}
+
+.log-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 16px;
+}
+
+.log-icon {
+  width: 64px;
+  height: 64px;
+  background: #f5f5f5;
+  border-radius: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #666;
+}
+
+.log-info h4 {
+  font-size: 16px;
+  font-weight: 600;
+  color: #333;
+  margin-bottom: 6px;
+}
+
+.log-info p {
+  font-size: 13px;
+  color: #999;
+}
+
+.log-actions {
+  display: flex;
+  gap: 12px;
 }
 
 /* 联系开发者页面 */
