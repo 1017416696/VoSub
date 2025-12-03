@@ -1246,16 +1246,21 @@ const getKeyModifier = (e: KeyboardEvent): string => {
 // 规范化键名（处理大小写和特殊键）
 const normalizeKeyName = (key: string): string => {
   const keyMap: Record<string, string> = {
-    'o': 'o',
-    'O': 'o',
-    's': 's',
-    'S': 's',
-    'z': 'z',
-    'Z': 'z',
-    'f': 'f',
-    'F': 'f',
-    'n': 'n',
-    'N': 'n',
+    o: 'o',
+    O: 'o',
+    s: 's',
+    S: 's',
+    z: 'z',
+    Z: 'z',
+    f: 'f',
+    F: 'f',
+    n: 'n',
+    N: 'n',
+    '=': '=',
+    '+': '=', // Shift+= 产生 +
+    '-': '-',
+    _: '-', // Shift+- 产生 _
+    '0': '0',
   }
   return keyMap[key] || key.toLowerCase()
 }
@@ -1430,14 +1435,6 @@ const handleKeydown = (e: KeyboardEvent) => {
   } else if (shortcuts.deleteEntry === pressedKey) {
     e.preventDefault()
     handleDeleteEntry()
-  } else if (hasAudio.value && (pressedKey === 'Cmd+=' || pressedKey === 'Cmd++' || pressedKey === 'Ctrl+=')) {
-    // macOS: Cmd+=, Windows/Linux: Ctrl+=
-    e.preventDefault()
-    handleZoomIn()
-  } else if (hasAudio.value && (pressedKey === 'Cmd+-' || pressedKey === 'Ctrl+-')) {
-    // macOS: Cmd+-, Windows/Linux: Ctrl+-
-    e.preventDefault()
-    handleZoomOut()
   } else if (e.key === 'ArrowDown') {
     // 向下箭头：在列表中向下导航
     e.preventDefault()
@@ -1478,6 +1475,18 @@ const handleKeydown = (e: KeyboardEvent) => {
     // 重做
     e.preventDefault()
     subtitleStore.redo()
+  } else if (shortcuts.zoomIn === pressedKey && hasAudio.value) {
+    // 放大波形
+    e.preventDefault()
+    waveformViewerRef.value?.zoomIn()
+  } else if (shortcuts.zoomOut === pressedKey && hasAudio.value) {
+    // 缩小波形
+    e.preventDefault()
+    waveformViewerRef.value?.zoomOut()
+  } else if (shortcuts.zoomReset === pressedKey && hasAudio.value) {
+    // 重置缩放
+    e.preventDefault()
+    handleZoomReset()
   }
 }
 </script>
