@@ -144,6 +144,60 @@ const filteredEntries = computed(() => {
   )
 })
 
+// 虚拟滚动配置
+const SUBTITLE_ITEM_HEIGHT = 76 // 每个字幕项高度（包含 margin）
+const VIRTUAL_OVERSCAN = 5 // 额外渲染的项数
+
+// 滚动状态
+const scrollTop = ref(0)
+const containerHeight = ref(400) // 默认高度，会在 mounted 时更新
+
+// 计算可见范围
+const visibleRange = computed(() => {
+  const start = Math.max(0, Math.floor(scrollTop.value / SUBTITLE_ITEM_HEIGHT) - VIRTUAL_OVERSCAN)
+  const visibleCount = Math.ceil(containerHeight.value / SUBTITLE_ITEM_HEIGHT) + VIRTUAL_OVERSCAN * 2
+  const end = Math.min(filteredEntries.value.length, start + visibleCount)
+  return { start, end }
+})
+
+// 虚拟列表数据
+const virtualList = computed(() => {
+  const { start, end } = visibleRange.value
+  return filteredEntries.value.slice(start, end).map((entry, index) => ({
+    data: entry,
+    index: start + index,
+  }))
+})
+
+// 总高度（用于滚动条）
+const totalHeight = computed(() => filteredEntries.value.length * SUBTITLE_ITEM_HEIGHT)
+
+// 偏移量（用于定位可见项）
+const offsetY = computed(() => visibleRange.value.start * SUBTITLE_ITEM_HEIGHT)
+
+// 处理滚动
+const handleVirtualScroll = (e: Event) => {
+  const target = e.target as HTMLElement
+  scrollTop.value = target.scrollTop
+}
+
+// 滚动到指定索引
+const virtualScrollTo = (index: number) => {
+  const container = subtitleListContainer.value
+  if (container) {
+    const targetScrollTop = index * SUBTITLE_ITEM_HEIGHT - containerHeight.value / 2 + SUBTITLE_ITEM_HEIGHT / 2
+    container.scrollTop = Math.max(0, targetScrollTop)
+  }
+}
+
+// 更新容器高度
+const updateContainerHeight = () => {
+  const container = subtitleListContainer.value
+  if (container) {
+    containerHeight.value = container.clientHeight
+  }
+}
+
 // 执行替换全部
 const replaceAll = async () => {
   if (!searchText.value) {
@@ -277,6 +331,14 @@ const handleTextInput = () => {
   }, 1500)
 }
 
+// 滚动到指定字幕项（虚拟滚动版本）
+const scrollToEntry = (entryId: number) => {
+  const index = filteredEntries.value.findIndex(e => e.id === entryId)
+  if (index !== -1) {
+    virtualScrollTo(index)
+  }
+}
+
 // 监听音频播放进度，自动更新当前字幕
 watch(() => audioStore.playerState.currentTime, (currentTime) => {
   if (hasAudio.value && !isUserSelectingEntry.value) {
@@ -284,13 +346,9 @@ watch(() => audioStore.playerState.currentTime, (currentTime) => {
     if (entry && selectedEntryId.value !== entry.id) {
       selectedEntryId.value = entry.id
 
-      // 自动滚动字幕列表，使当前字幕保持在可见范围内
+      // 自动滚动字幕列表，使当前字幕保持在可见范围内（虚拟滚动）
       nextTick(() => {
-        const itemElement = subtitleItemRefs[entry.id]
-        const containerElement = subtitleListContainer.value
-        if (itemElement && containerElement) {
-          itemElement.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
-        }
+        scrollToEntry(entry.id)
       })
     }
   }
@@ -312,6 +370,9 @@ const handleAltKeyUp = (e: KeyboardEvent) => {
 }
 
 // 初始化时选中第一条字幕，设置菜单监听和快捷键
+// ResizeObserver 用于监听容器大小变化
+let resizeObserver: ResizeObserver | null = null
+
 onMounted(async () => {
   // 如果没有打开的 tab，跳转到欢迎页
   if (!tabManager.hasTabs) {
@@ -322,6 +383,18 @@ onMounted(async () => {
   if (subtitleStore.entries.length > 0) {
     selectedEntryId.value = subtitleStore.entries[0]?.id ?? null
   }
+
+  // 初始化虚拟滚动容器高度
+  nextTick(() => {
+    updateContainerHeight()
+    // 监听容器大小变化
+    if (subtitleListContainer.value) {
+      resizeObserver = new ResizeObserver(() => {
+        updateContainerHeight()
+      })
+      resizeObserver.observe(subtitleListContainer.value)
+    }
+  })
 
   try {
     // 注册全局菜单处理函数（供 main.ts 中的全局监听器调用）
@@ -357,6 +430,11 @@ onBeforeUnmount(() => {
   if (unlistenOpenFile) {
     unlistenOpenFile()
     unlistenOpenFile = null
+  }
+  // 清理 ResizeObserver
+  if (resizeObserver) {
+    resizeObserver.disconnect()
+    resizeObserver = null
   }
   // 清除全局处理函数
   ;(window as any).__handleMenuOpenFile = null
@@ -1324,13 +1402,9 @@ const navigateSubtitleList = (direction: 'up' | 'down') => {
     if (targetEntry) {
       selectEntry(targetEntry.id)
 
-      // 自动滚动字幕列表，使目标字幕保持在可见范围内
+      // 自动滚动字幕列表，使目标字幕保持在可见范围内（虚拟滚动）
       nextTick(() => {
-        const itemElement = subtitleItemRefs[targetEntry.id]
-        const containerElement = subtitleListContainer.value
-        if (itemElement && containerElement) {
-          itemElement.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
-        }
+        scrollToEntry(targetEntry.id)
       })
     }
   }
@@ -1749,81 +1823,83 @@ const handleKeydown = (e: KeyboardEvent) => {
           </div>
         </div>
 
-        <!-- 字幕列表 -->
-        <div class="subtitle-list" ref="subtitleListContainer">
-          <div
-            v-for="entry in filteredEntries"
-            :key="entry.id"
-            :ref="(el) => { if (el) subtitleItemRefs[entry.id] = el as HTMLElement }"
-            class="subtitle-item"
-            :class="{
-              'is-selected': selectedEntryId === entry.id
-            }"
-            @click="selectEntry(entry.id)"
-            @dblclick="handleSubtitleDoubleClick(entry.id)"
-          >
-            <div class="item-header">
-              <span class="item-number">{{ entry.id }}</span>
-              <span class="item-time">
-                {{ subtitleStore.formatTimeStamp(entry.startTime).slice(0, 8) }}
-                -
-                {{ subtitleStore.formatTimeStamp(entry.endTime).slice(0, 8) }}
-              </span>
-            </div>
-
-            <!-- 文本和操作按钮在同一行 -->
-            <div class="item-content">
-              <div class="item-text-wrapper">
-                <div class="item-text" v-if="searchText" v-html="highlightSearchText(entry.text, searchText)"></div>
-                <div class="item-text" v-else>{{ entry.text }}</div>
+        <!-- 字幕列表（虚拟滚动） -->
+        <div class="subtitle-list" ref="subtitleListContainer" @scroll="handleVirtualScroll">
+          <div class="virtual-list-wrapper" :style="{ height: totalHeight + 'px', paddingTop: offsetY + 'px' }">
+            <div
+              v-for="{ data: entry } in virtualList"
+              :key="entry.id"
+              :ref="(el) => { if (el) subtitleItemRefs[entry.id] = el as HTMLElement }"
+              class="subtitle-item"
+              :class="{
+                'is-selected': selectedEntryId === entry.id
+              }"
+              @click="selectEntry(entry.id)"
+              @dblclick="handleSubtitleDoubleClick(entry.id)"
+            >
+              <div class="item-header">
+                <span class="item-number">{{ entry.id }}</span>
+                <span class="item-time">
+                  {{ subtitleStore.formatTimeStamp(entry.startTime).slice(0, 8) }}
+                  -
+                  {{ subtitleStore.formatTimeStamp(entry.endTime).slice(0, 8) }}
+                </span>
               </div>
 
-              <!-- 操作按钮 -->
-              <div class="item-actions">
-                <el-button
-                  link
-                  type="primary"
-                  size="small"
-                  title="复制文本"
-                  @click.stop="copySubtitleText(entry.id)"
-                >
-                  <template #icon>
-                    <DocumentCopy />
-                  </template>
-                </el-button>
-                <el-button
-                  v-if="hasAudio"
-                  link
-                  type="primary"
-                  size="small"
-                  title="播放字幕音频"
-                  @click.stop="playSubtitleAudio(entry.id)"
-                >
-                  <template #icon>
-                    <VideoPlay />
-                  </template>
-                </el-button>
-                <el-button
-                  link
-                  type="danger"
-                  size="small"
-                  title="删除字幕"
-                  @click.stop="deleteSubtitleItem(entry.id)"
-                >
-                  <template #icon>
-                    <Delete />
-                  </template>
-                </el-button>
+              <!-- 文本和操作按钮在同一行 -->
+              <div class="item-content">
+                <div class="item-text-wrapper">
+                  <div class="item-text" v-if="searchText" v-html="highlightSearchText(entry.text, searchText)"></div>
+                  <div class="item-text" v-else>{{ entry.text }}</div>
+                </div>
+
+                <!-- 操作按钮 -->
+                <div class="item-actions">
+                  <el-button
+                    link
+                    type="primary"
+                    size="small"
+                    title="复制文本"
+                    @click.stop="copySubtitleText(entry.id)"
+                  >
+                    <template #icon>
+                      <DocumentCopy />
+                    </template>
+                  </el-button>
+                  <el-button
+                    v-if="hasAudio"
+                    link
+                    type="primary"
+                    size="small"
+                    title="播放字幕音频"
+                    @click.stop="playSubtitleAudio(entry.id)"
+                  >
+                    <template #icon>
+                      <VideoPlay />
+                    </template>
+                  </el-button>
+                  <el-button
+                    link
+                    type="danger"
+                    size="small"
+                    title="删除字幕"
+                    @click.stop="deleteSubtitleItem(entry.id)"
+                  >
+                    <template #icon>
+                      <Delete />
+                    </template>
+                  </el-button>
+                </div>
               </div>
             </div>
           </div>
 
           <!-- 空状态 -->
-          <div v-if="filteredEntries.length === 0 && hasContent" class="empty-state">
+          <div v-if="filteredEntries.length === 0 && hasContent" class="empty-state empty-state-absolute">
             <p class="text-gray-400">未找到匹配的字幕</p>
           </div>
 
-          <div v-if="!hasContent" class="empty-state">
+          <div v-if="!hasContent" class="empty-state empty-state-absolute">
             <p class="text-gray-400">暂无字幕数据</p>
             <el-button type="text" @click="goBack">返回加载文件</el-button>
           </div>
@@ -2225,6 +2301,7 @@ const handleKeydown = (e: KeyboardEvent) => {
   flex: 1;
   display: flex;
   overflow: hidden;
+  min-height: 0;
 }
 
 /* 左侧侧边栏 */
@@ -2344,6 +2421,8 @@ const handleKeydown = (e: KeyboardEvent) => {
   border-right: 1px solid #e2e8f0;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
 }
 
 /* 搜索和替换框 */
@@ -2518,6 +2597,22 @@ const handleKeydown = (e: KeyboardEvent) => {
   flex: 1;
   overflow-y: auto;
   padding: 0.5rem;
+  position: relative;
+  min-height: 0;
+}
+
+.virtual-list-wrapper {
+  position: relative;
+  box-sizing: border-box;
+}
+
+/* 虚拟滚动空状态需要绝对定位 */
+.empty-state-absolute {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 100%;
 }
 
 .subtitle-item {
@@ -2530,6 +2625,10 @@ const handleKeydown = (e: KeyboardEvent) => {
   transition: all 0.2s ease;
   user-select: none;
   -webkit-user-select: none;
+  /* 固定高度以支持虚拟滚动 */
+  height: 70px;
+  box-sizing: border-box;
+  overflow: hidden;
 }
 
 .subtitle-item:hover {
