@@ -503,6 +503,8 @@ const onTitlebarDoubleClick = async () => {
   font-size: 14px;
   color: #6b7280;
   margin: 0;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 /* 拖放区域 */
@@ -557,12 +559,16 @@ const onTitlebarDoubleClick = async () => {
   font-weight: 600;
   color: #374151;
   margin: 0 0 0.5rem;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .drop-hint {
   font-size: 13px;
   color: #9ca3af;
   margin: 0;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .file-type {
@@ -604,6 +610,8 @@ const onTitlebarDoubleClick = async () => {
   font-size: 14px;
   color: #6b7280;
   margin: 0;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 /* 操作按钮 */
@@ -663,6 +671,8 @@ const onTitlebarDoubleClick = async () => {
   color: #9ca3af;
   margin: 0;
   text-align: center;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 /* 快捷键栏 */
@@ -684,6 +694,8 @@ const onTitlebarDoubleClick = async () => {
 .shortcut-label {
   font-size: 13px;
   color: #666;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .shortcut-keys {
@@ -722,6 +734,8 @@ const onTitlebarDoubleClick = async () => {
   font-weight: 500;
   color: #6b7280;
   margin-bottom: 0.5rem;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .recent-header .el-icon {
@@ -764,11 +778,15 @@ const onTitlebarDoubleClick = async () => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .recent-item .file-time {
   font-size: 12px;
   color: #9ca3af;
   flex-shrink: 0;
+  user-select: none;
+  -webkit-user-select: none;
 }
 </style>

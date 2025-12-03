@@ -2211,6 +2211,8 @@ const handleKeydown = (e: KeyboardEvent) => {
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 150px;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 /* 控制标签 */
@@ -2219,6 +2221,8 @@ const handleKeydown = (e: KeyboardEvent) => {
   color: #666;
   white-space: nowrap;
   margin-right: 0.25rem;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 /* 缩放按钮 */
@@ -2268,6 +2272,8 @@ const handleKeydown = (e: KeyboardEvent) => {
   font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
   font-weight: 500;
   min-width: 42px;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 /* 播放按钮 */
@@ -2287,6 +2293,8 @@ const handleKeydown = (e: KeyboardEvent) => {
   color: #999;
   min-width: 35px;
   text-align: right;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 /* 速度按钮 */
@@ -2716,6 +2724,8 @@ const handleKeydown = (e: KeyboardEvent) => {
   text-overflow: ellipsis;
   flex: 1;
   min-width: 0;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .count-info {
@@ -2723,6 +2733,8 @@ const handleKeydown = (e: KeyboardEvent) => {
   white-space: nowrap;
   flex-shrink: 0;
   font-weight: 500;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .empty-state {
@@ -2784,6 +2796,8 @@ const handleKeydown = (e: KeyboardEvent) => {
   padding: 0.25rem 0.625rem;
   border-radius: 6px;
   border: 1px solid #bfdbfe;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .edit-title {
@@ -2791,6 +2805,8 @@ const handleKeydown = (e: KeyboardEvent) => {
   font-weight: 600;
   color: #1e293b;
   margin: 0;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .delete-entry-btn {
@@ -2835,6 +2851,8 @@ const handleKeydown = (e: KeyboardEvent) => {
   font-weight: 500;
   color: #64748b;
   white-space: nowrap;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .time-control {
@@ -2915,6 +2933,8 @@ const handleKeydown = (e: KeyboardEvent) => {
   font-size: 0.875rem;
   color: #94a3b8;
   font-weight: 400;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .duration-block {
@@ -2934,6 +2954,8 @@ const handleKeydown = (e: KeyboardEvent) => {
   font-size: 0.8125rem;
   font-weight: 600;
   color: #0369a1;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 /* 文本编辑卡片 - 新设计 */
@@ -2968,6 +2990,8 @@ const handleKeydown = (e: KeyboardEvent) => {
   font-size: 0.8125rem;
   font-weight: 600;
   color: #475569;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .char-count {
@@ -2978,6 +3002,8 @@ const handleKeydown = (e: KeyboardEvent) => {
   background: #ffffff;
   border-radius: 6px;
   border: 1px solid #e2e8f0;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .text-input-wrapper {
@@ -3030,6 +3056,8 @@ const handleKeydown = (e: KeyboardEvent) => {
   font-weight: 500;
   color: #94a3b8;
   white-space: nowrap;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .actions-group {
@@ -3053,6 +3081,8 @@ const handleKeydown = (e: KeyboardEvent) => {
   font-size: 0.8125rem;
   font-weight: 500;
   color: #475569;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .quick-action-btn:hover {
