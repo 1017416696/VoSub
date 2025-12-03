@@ -41,7 +41,7 @@
           <!-- 字幕轨道 -->
           <div class="subtitle-track" :class="{ 'scissor-mode': props.scissorMode }" :style="{ height: subtitleTrackHeight + 'px' }" @mousedown="handleTrackMouseDown">
             <div
-              v-for="subtitle in subtitles"
+              v-for="subtitle in visibleSubtitles"
               :key="subtitle.id"
               class="subtitle-block"
               :class="{
@@ -217,6 +217,28 @@ const currentSubtitleId = ref<number | null>(null)
 // 拖拽节流控制
 const dragRAF = ref<number | null>(null)
 const pendingDragEvent = ref<MouseEvent | null>(null)
+
+// 滚动位置追踪（用于虚拟渲染）
+const scrollLeft = ref(0)
+const viewportWidth = ref(800) // 默认值，会在 mounted 时更新
+
+// 可见字幕过滤（虚拟渲染优化）
+const visibleSubtitles = computed(() => {
+  if (!props.subtitles || props.subtitles.length === 0) return []
+
+  // 计算可见时间范围（加上缓冲区）
+  const bufferPx = 200 // 左右各 200px 缓冲区
+  const visibleStartTime = Math.max(0, pixelToTime(scrollLeft.value - bufferPx))
+  const visibleEndTime = Math.min(props.duration, pixelToTime(scrollLeft.value + viewportWidth.value + bufferPx))
+
+  // 过滤出在可见范围内的字幕
+  return props.subtitles.filter(subtitle => {
+    const startTime = timestampToSeconds(subtitle.startTime)
+    const endTime = timestampToSeconds(subtitle.endTime)
+    // 字幕与可见范围有交集
+    return endTime >= visibleStartTime && startTime <= visibleEndTime
+  })
+})
 
 // 剪刀模式参考线位置
 const scissorLineX = ref<number | null>(null)
@@ -521,7 +543,9 @@ const scrollToTime = (time: number) => {
 
 // Handle scroll
 const handleScroll = () => {
-  // 可以在这里添加滚动时的逻辑
+  if (trackAreaRef.value) {
+    scrollLeft.value = trackAreaRef.value.scrollLeft
+  }
 }
 
 // Handle timeline click to seek
@@ -1431,7 +1455,29 @@ const handleScissorMouseLeave = () => {
   scissorLineX.value = null
 }
 
+// 更新视口宽度（用于虚拟渲染）
+const updateViewportWidth = () => {
+  if (trackAreaRef.value) {
+    viewportWidth.value = trackAreaRef.value.clientWidth
+    scrollLeft.value = trackAreaRef.value.scrollLeft
+  }
+}
+
+// ResizeObserver 用于监听视口大小变化
+let viewportResizeObserver: ResizeObserver | null = null
+
 onMounted(() => {
+  // 初始化视口宽度
+  updateViewportWidth()
+
+  // 监听视口大小变化
+  if (trackAreaRef.value) {
+    viewportResizeObserver = new ResizeObserver(() => {
+      updateViewportWidth()
+    })
+    viewportResizeObserver.observe(trackAreaRef.value)
+  }
+
   // 只有在波形生成完成且数据存在时才加载
   if (props.waveformData && props.waveformData.length > 0 && !props.isGeneratingWaveform) {
     setTimeout(() => {
@@ -1443,6 +1489,11 @@ onMounted(() => {
 onUnmounted(() => {
   if (waveformRebuildTimer.value) {
     clearTimeout(waveformRebuildTimer.value)
+  }
+  // 清理视口 ResizeObserver
+  if (viewportResizeObserver) {
+    viewportResizeObserver.disconnect()
+    viewportResizeObserver = null
   }
   // 清理拖拽相关的 RAF
   if (dragRAF.value !== null) {
