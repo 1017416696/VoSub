@@ -902,6 +902,60 @@ const adjustTime = async (type: 'start' | 'end', deltaMs: number) => {
   }
 }
 
+// 移动字幕位置（整体前移或后移指定毫秒数）
+const moveSubtitlePosition = async (deltaMs: number) => {
+  if (!currentEntry.value) return
+
+  try {
+    // 如果正在播放，暂停
+    if (audioStore.playerState.isPlaying) {
+      audioStore.pause()
+    }
+
+    // 获取当前开始和结束时间并转换为毫秒
+    let startMs = timeStampToMs(currentEntry.value.startTime)
+    let endMs = timeStampToMs(currentEntry.value.endTime)
+
+    // 添加增量
+    startMs += deltaMs
+    endMs += deltaMs
+
+    // 确保时间不为负
+    if (startMs < 0) {
+      // 如果开始时间变为负数，整体平移使开始时间为 0
+      const offset = -startMs
+      startMs = 0
+      endMs += offset
+    }
+
+    // 转换回 TimeStamp 格式
+    const msToTimeStamp = (ms: number): TimeStamp => ({
+      hours: Math.floor(ms / 3600000),
+      minutes: Math.floor((ms % 3600000) / 60000),
+      seconds: Math.floor((ms % 60000) / 1000),
+      milliseconds: ms % 1000
+    })
+
+    const newStartTime = msToTimeStamp(startMs)
+    const newEndTime = msToTimeStamp(endMs)
+
+    // 更新时间（需要记录历史）
+    subtitleStore.updateEntryTime(currentEntry.value.id, newStartTime, newEndTime, true)
+    editingStartTime.value = subtitleStore.formatTimeStamp(newStartTime)
+    editingEndTime.value = subtitleStore.formatTimeStamp(newEndTime)
+
+    // 保存文件
+    if (subtitleStore.currentFilePath) {
+      await subtitleStore.saveToFile()
+    }
+  } catch (error) {
+    ElMessage.error({
+      message: '字幕位置调整失败',
+      duration: 2000,
+    })
+  }
+}
+
 // 处理波形点击跳转
 const handleWaveformSeek = (time: number) => {
   audioStore.seek(time)
@@ -1396,6 +1450,14 @@ const handleKeydown = (e: KeyboardEvent) => {
     // 向上箭头：在列表中向上导航
     e.preventDefault()
     navigateSubtitleList('up')
+  } else if (e.key === 'ArrowLeft' && currentEntry.value) {
+    // 左方向键：字幕整体前移 100ms
+    e.preventDefault()
+    moveSubtitlePosition(-100)
+  } else if (e.key === 'ArrowRight' && currentEntry.value) {
+    // 右方向键：字幕整体后移 100ms
+    e.preventDefault()
+    moveSubtitlePosition(100)
   } else if (e.key === 'x' || e.key === 'X') {
     // x 键：开启/关闭分割模式
     e.preventDefault()

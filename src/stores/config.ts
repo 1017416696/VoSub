@@ -31,10 +31,10 @@ export const useConfigStore = defineStore('config', () => {
   // 快捷键绑定
   const keyBindings = ref<KeyBinding[]>([
     { key: 'Space', description: '播放/暂停', action: 'toggle-play' },
-    { key: 'ArrowLeft', description: '上一条字幕', action: 'prev-subtitle' },
-    { key: 'ArrowRight', description: '下一条字幕', action: 'next-subtitle' },
-    { key: 'ArrowUp', description: '增加音量', action: 'volume-up' },
-    { key: 'ArrowDown', description: '减少音量', action: 'volume-down' },
+    { key: 'ArrowUp', description: '上一条字幕', action: 'prev-subtitle' },
+    { key: 'ArrowDown', description: '下一条字幕', action: 'next-subtitle' },
+    { key: 'ArrowLeft', description: '字幕前移100ms', action: 'move-subtitle-left' },
+    { key: 'ArrowRight', description: '字幕后移100ms', action: 'move-subtitle-right' },
     { key: 'Enter', description: '编辑字幕', action: 'edit-subtitle' },
     { key: 'Escape', description: '退出编辑', action: 'exit-edit' },
     { key: 'Delete', description: '删除字幕', action: 'delete-subtitle' },
