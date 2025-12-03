@@ -83,7 +83,12 @@
                 width: Math.abs(selectionBox.endX - selectionBox.startX) + 'px',
                 height: subtitleTrackHeight + 'px'
               }"
-            ></div>
+            >
+              <!-- 选中数量提示 -->
+              <div v-if="selectedSubtitleIds.size > 0" class="selection-count">
+                {{ selectedSubtitleIds.size }}
+              </div>
+            </div>
           </div>
 
           <!-- 播放指针 -->
@@ -1751,6 +1756,25 @@ defineExpose({
   pointer-events: none;
   z-index: 5;
   border-radius: 4px;
+}
+
+/* 选中数量提示 */
+.selection-count {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  min-width: 18px;
+  height: 18px;
+  line-height: 18px;
+  text-align: center;
+  background: #3b82f6;
+  color: white;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 0 5px;
+  border-radius: 9px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+  z-index: 10;
 }
 
 /* 剪刀模式 - 使用竖着的剪刀光标（通过 g transform 旋转） */
