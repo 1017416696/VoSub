@@ -52,6 +52,7 @@ export const useConfigStore = defineStore('config', () => {
     { key: 'Ctrl+,', description: '设置', action: 'settings' },
     { key: 'X', description: '分割字幕', action: 'split-subtitle' },
     { key: 'S', description: '拖拽吸附', action: 'toggle-snap' },
+    { key: 'A', description: '对齐到波形', action: 'align-to-waveform' },
   ])
 
   // 更新配置

@@ -1135,8 +1135,6 @@ const handleAlignToWaveform = async () => {
   if (subtitleStore.currentFilePath) {
     await subtitleStore.saveToFile()
   }
-
-  ElMessage.success('已对齐到波形')
 }
 
 // 处理字幕分割
@@ -1406,6 +1404,10 @@ const handleKeydown = (e: KeyboardEvent) => {
     // s 键：开启/关闭吸附模式
     e.preventDefault()
     isSnapEnabled.value = !isSnapEnabled.value
+  } else if ((e.key === 'a' || e.key === 'A') && hasAudio.value) {
+    // a 键：对齐到波形
+    e.preventDefault()
+    handleAlignToWaveform()
   } else if (pressedKey === 'Cmd+,' || pressedKey === 'Ctrl+,') {
     // Command+逗号 或 Ctrl+逗号：打开设置
     e.preventDefault()
@@ -1571,7 +1573,7 @@ const handleKeydown = (e: KeyboardEvent) => {
             class="sidebar-btn"
             @click="handleAlignToWaveform"
             :disabled="!hasAudio || !currentEntry"
-            title="对齐到波形"
+            title="对齐到波形 (A)"
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M2 12h4l3-9 4 18 3-9h6"/>
