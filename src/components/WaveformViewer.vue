@@ -104,6 +104,16 @@
             <div class="scissor-line-bar"></div>
             <div class="scissor-icon">✂</div>
           </div>
+
+          <!-- 吸附参考线 -->
+          <div
+            v-if="snapLineX !== null"
+            class="snap-line"
+            :class="{ 'snap-waveform': snapLineType === 'waveform' }"
+            :style="{ left: snapLineX + 'px' }"
+          >
+            <div class="snap-line-bar"></div>
+          </div>
         </div>
       </div>
     </div>
@@ -123,6 +133,7 @@ interface Props {
   waveformProgress?: number
   currentSubtitleId?: number | null
   scissorMode?: boolean
+  snapEnabled?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -132,7 +143,8 @@ const props = withDefaults(defineProps<Props>(), {
   isGeneratingWaveform: false,
   waveformProgress: 0,
   currentSubtitleId: null,
-  scissorMode: false
+  scissorMode: false,
+  snapEnabled: false
 })
 
 // 计算属性，用于调试
@@ -194,6 +206,152 @@ const currentSubtitleId = ref<number | null>(null)
 
 // 剪刀模式参考线位置
 const scissorLineX = ref<number | null>(null)
+
+// 吸附功能相关
+const SNAP_THRESHOLD_PX = 8 // 吸附阈值（像素）
+const snapLineX = ref<number | null>(null) // 吸附参考线位置
+const snapLineType = ref<'start' | 'end' | 'waveform' | null>(null) // 吸附类型
+
+// 缓存波形边界点（避免重复计算）
+const waveformEdgesCache = ref<number[]>([])
+const waveformEdgesCacheKey = ref<string>('')
+
+// 检测波形中的语音边界（静音到有声、有声到静音的转换点）
+const detectWaveformEdges = (searchTimeStart: number, searchTimeEnd: number): number[] => {
+  if (!props.waveformData || props.waveformData.length === 0 || props.duration <= 0) {
+    return []
+  }
+
+  const data = props.waveformData
+  const durationMs = props.duration * 1000
+  const numPoints = data.length / 2
+  const msPerPoint = durationMs / numPoints
+
+  // 转换搜索范围到索引
+  const searchStartMs = Math.max(0, searchTimeStart * 1000 - 500) // 扩展 500ms
+  const searchEndMs = Math.min(durationMs, searchTimeEnd * 1000 + 500)
+  const startIdx = Math.floor(searchStartMs / msPerPoint)
+  const endIdx = Math.min(Math.ceil(searchEndMs / msPerPoint), numPoints)
+
+  if (endIdx - startIdx < 10) return []
+
+  // 提取振幅数据
+  const amplitudes: number[] = []
+  for (let i = startIdx; i < endIdx; i++) {
+    const maxVal = Math.abs(data[i * 2 + 1] || 0)
+    amplitudes.push(maxVal)
+  }
+
+  // 计算动态阈值
+  const sortedAmps = [...amplitudes].sort((a, b) => a - b)
+  const lowPercentile = sortedAmps[Math.floor(sortedAmps.length * 0.25)] ?? 0
+  const highPercentile = sortedAmps[Math.floor(sortedAmps.length * 0.75)] ?? 0
+  
+  if (highPercentile - lowPercentile < 0.02) return []
+
+  const threshold = lowPercentile + (highPercentile - lowPercentile) * 0.3
+
+  // 平滑振幅
+  const smoothed: number[] = []
+  for (let i = 0; i < amplitudes.length; i++) {
+    let sum = 0
+    let count = 0
+    for (let j = Math.max(0, i - 2); j <= Math.min(amplitudes.length - 1, i + 2); j++) {
+      sum += amplitudes[j] ?? 0
+      count++
+    }
+    smoothed.push(sum / count)
+  }
+
+  // 检测边界点（静音到有声、有声到静音的转换）
+  const edges: number[] = []
+  let wasVoice = (smoothed[0] ?? 0) >= threshold
+
+  for (let i = 1; i < smoothed.length; i++) {
+    const isVoice = (smoothed[i] ?? 0) >= threshold
+    if (isVoice !== wasVoice) {
+      // 转换点：转换为时间（秒）
+      const timeMs = (startIdx + i) * msPerPoint
+      edges.push(timeMs / 1000)
+    }
+    wasVoice = isVoice
+  }
+
+  return edges
+}
+
+// 计算吸附点（其他字幕的边缘时间 + 波形边界）
+const getSnapPoints = (excludeIds: number[], searchTimeStart?: number, searchTimeEnd?: number): number[] => {
+  const points: number[] = [0] // 始终包含 0 点
+  
+  // 添加其他字幕的边缘
+  props.subtitles.forEach(subtitle => {
+    if (excludeIds.includes(subtitle.id)) return
+    points.push(timestampToSeconds(subtitle.startTime))
+    points.push(timestampToSeconds(subtitle.endTime))
+  })
+  
+  // 添加波形边界点（如果提供了搜索范围）
+  if (searchTimeStart !== undefined && searchTimeEnd !== undefined) {
+    const waveformEdges = detectWaveformEdges(searchTimeStart, searchTimeEnd)
+    waveformEdges.forEach(edge => {
+      if (!points.includes(edge)) {
+        points.push(edge)
+      }
+    })
+  }
+  
+  return points.sort((a, b) => a - b)
+}
+
+// 查找最近的吸附点
+const findSnapPoint = (
+  time: number, 
+  excludeIds: number[], 
+  side: 'start' | 'end' | 'both' = 'both',
+  searchRange?: { start: number; end: number }
+): { time: number; snapped: boolean; snapType: 'start' | 'end' | 'waveform' | null } => {
+  const snapPoints = getSnapPoints(
+    excludeIds, 
+    searchRange?.start ?? time - 2, 
+    searchRange?.end ?? time + 2
+  )
+  const thresholdTime = pixelToTime(SNAP_THRESHOLD_PX)
+  
+  let closestPoint = time
+  let minDistance = Infinity
+  let snapType: 'start' | 'end' | 'waveform' | null = null
+  
+  for (const point of snapPoints) {
+    const distance = Math.abs(point - time)
+    if (distance < minDistance && distance <= thresholdTime) {
+      minDistance = distance
+      closestPoint = point
+      
+      // 判断吸附类型：先检查是否是字幕边缘
+      const matchingSubtitle = props.subtitles.find(s => {
+        if (excludeIds.includes(s.id)) return false
+        const start = timestampToSeconds(s.startTime)
+        const end = timestampToSeconds(s.endTime)
+        return Math.abs(start - point) < 0.001 || Math.abs(end - point) < 0.001
+      })
+      
+      if (matchingSubtitle) {
+        const start = timestampToSeconds(matchingSubtitle.startTime)
+        snapType = Math.abs(start - point) < 0.001 ? 'start' : 'end'
+      } else {
+        // 不是字幕边缘，可能是波形边界
+        snapType = 'waveform'
+      }
+    }
+  }
+  
+  return {
+    time: closestPoint,
+    snapped: minDistance <= thresholdTime,
+    snapType
+  }
+}
 
 // Helper: Time to pixel position
 const timeToPixel = (time: number): number => {
@@ -683,18 +841,71 @@ const handleSubtitleMouseDown = (event: MouseEvent, subtitle: SubtitleEntry) => 
 const handleSubtitleDrag = (event: MouseEvent) => {
   const deltaX = event.clientX - dragStartX.value
   const deltaTime = pixelToTime(deltaX)
+  
+  // 吸附开关：需要开启吸附模式，且没有按住 Alt 键
+  const snapActive = props.snapEnabled && !event.altKey
 
   // 批量拖拽
   if (draggingSelectedSubtitles.value.length > 0) {
     const updates: Array<{ id: number; startTime: TimeStamp; endTime: TimeStamp }> = []
+    const excludeIds = draggingSelectedSubtitles.value.map(s => s.id)
+    
+    // 使用第一个字幕作为吸附参考
+    const firstSubtitle = draggingSelectedSubtitles.value[0]
+    const firstOriginalStart = dragStartTimes.value.get(firstSubtitle.id)
+    if (firstOriginalStart === undefined) return
+    
+    const firstDuration = timestampToSeconds(firstSubtitle.endTime) - timestampToSeconds(firstSubtitle.startTime)
+    let rawNewStart = Math.max(0, firstOriginalStart + deltaTime)
+    let rawNewEnd = rawNewStart + firstDuration
+    
+    // 选择更近的吸附点
+    let snapOffset = 0
+    
+    if (snapActive) {
+      // 检查开始和结束边缘的吸附（包含波形边界搜索范围）
+      const searchRange = { start: rawNewStart - 1, end: rawNewEnd + 1 }
+      const startSnap = findSnapPoint(rawNewStart, excludeIds, 'start', searchRange)
+      const endSnap = findSnapPoint(rawNewEnd, excludeIds, 'end', searchRange)
+      
+      if (startSnap.snapped && endSnap.snapped) {
+        // 两边都能吸附，选择更近的
+        const startDist = Math.abs(startSnap.time - rawNewStart)
+        const endDist = Math.abs(endSnap.time - rawNewEnd)
+        if (startDist <= endDist) {
+          snapOffset = startSnap.time - rawNewStart
+          snapLineX.value = timeToPixel(startSnap.time)
+          snapLineType.value = startSnap.snapType
+        } else {
+          snapOffset = endSnap.time - rawNewEnd
+          snapLineX.value = timeToPixel(endSnap.time)
+          snapLineType.value = endSnap.snapType
+        }
+      } else if (startSnap.snapped) {
+        snapOffset = startSnap.time - rawNewStart
+        snapLineX.value = timeToPixel(startSnap.time)
+        snapLineType.value = startSnap.snapType
+      } else if (endSnap.snapped) {
+        snapOffset = endSnap.time - rawNewEnd
+        snapLineX.value = timeToPixel(endSnap.time)
+        snapLineType.value = endSnap.snapType
+      } else {
+        snapLineX.value = null
+        snapLineType.value = null
+      }
+    } else {
+      // 禁用吸附时清除参考线
+      snapLineX.value = null
+      snapLineType.value = null
+    }
     
     draggingSelectedSubtitles.value.forEach(subtitle => {
       const originalStartTime = dragStartTimes.value.get(subtitle.id)
       if (originalStartTime === undefined) return
 
-      const newStartTime = Math.max(0, originalStartTime + deltaTime)
+      let newStartTime = Math.max(0, originalStartTime + deltaTime + snapOffset)
       const duration = timestampToSeconds(subtitle.endTime) - timestampToSeconds(subtitle.startTime)
-      const newEndTime = Math.min(props.duration, newStartTime + duration)
+      let newEndTime = Math.min(props.duration, newStartTime + duration)
 
       if (newEndTime <= props.duration && newStartTime >= 0) {
         updates.push({
@@ -711,10 +922,58 @@ const handleSubtitleDrag = (event: MouseEvent) => {
   } 
   // 单个拖拽
   else if (draggingSubtitle.value) {
-    const newStartTime = Math.max(0, dragStartTime.value + deltaTime)
     const subtitle = draggingSubtitle.value
     const duration = timestampToSeconds(subtitle.endTime) - timestampToSeconds(subtitle.startTime)
-    const newEndTime = Math.min(props.duration, newStartTime + duration)
+    let rawNewStart = Math.max(0, dragStartTime.value + deltaTime)
+    let rawNewEnd = rawNewStart + duration
+    
+    let newStartTime = rawNewStart
+    let newEndTime = rawNewEnd
+    
+    if (snapActive) {
+      // 检查开始和结束边缘的吸附（包含波形边界搜索范围）
+      const excludeIds = [subtitle.id]
+      const searchRange = { start: rawNewStart - 1, end: rawNewEnd + 1 }
+      const startSnap = findSnapPoint(rawNewStart, excludeIds, 'start', searchRange)
+      const endSnap = findSnapPoint(rawNewEnd, excludeIds, 'end', searchRange)
+      
+      if (startSnap.snapped && endSnap.snapped) {
+        const startDist = Math.abs(startSnap.time - rawNewStart)
+        const endDist = Math.abs(endSnap.time - rawNewEnd)
+        if (startDist <= endDist) {
+          newStartTime = startSnap.time
+          newEndTime = newStartTime + duration
+          snapLineX.value = timeToPixel(startSnap.time)
+          snapLineType.value = startSnap.snapType
+        } else {
+          newEndTime = endSnap.time
+          newStartTime = newEndTime - duration
+          snapLineX.value = timeToPixel(endSnap.time)
+          snapLineType.value = endSnap.snapType
+        }
+      } else if (startSnap.snapped) {
+        newStartTime = startSnap.time
+        newEndTime = newStartTime + duration
+        snapLineX.value = timeToPixel(startSnap.time)
+        snapLineType.value = startSnap.snapType
+      } else if (endSnap.snapped) {
+        newEndTime = endSnap.time
+        newStartTime = newEndTime - duration
+        snapLineX.value = timeToPixel(endSnap.time)
+        snapLineType.value = endSnap.snapType
+      } else {
+        snapLineX.value = null
+        snapLineType.value = null
+      }
+    } else {
+      // 禁用吸附时清除参考线
+      snapLineX.value = null
+      snapLineType.value = null
+    }
+    
+    // 边界检查
+    newStartTime = Math.max(0, newStartTime)
+    newEndTime = Math.min(props.duration, newEndTime)
 
     if (newEndTime <= props.duration) {
       emit('updateSubtitle', subtitle.id, secondsToTimestamp(newStartTime), secondsToTimestamp(newEndTime))
@@ -730,6 +989,9 @@ const handleSubtitleDragEnd = () => {
   draggingSelectedSubtitles.value = []
   dragStartTimes.value.clear()
   currentSubtitleId.value = null
+  // 清除吸附线
+  snapLineX.value = null
+  snapLineType.value = null
   document.removeEventListener('mousemove', handleSubtitleDrag)
   document.removeEventListener('mouseup', handleSubtitleDragEnd)
 }
@@ -753,16 +1015,58 @@ const handleResize = (event: MouseEvent) => {
   const { subtitle, side } = resizingSubtitle.value
   const deltaX = event.clientX - dragStartX.value
   const deltaTime = pixelToTime(deltaX)
+  const excludeIds = [subtitle.id]
+  
+  // 吸附开关：需要开启吸附模式，且没有按住 Alt 键
+  const snapActive = props.snapEnabled && !event.altKey
 
   let newStartTime = timestampToSeconds(subtitle.startTime)
   let newEndTime = timestampToSeconds(subtitle.endTime)
 
   if (side === 'left') {
-    newStartTime = Math.max(0, newStartTime + deltaTime)
-    newStartTime = Math.min(newStartTime, newEndTime - 0.1)
+    let rawNewStart = Math.max(0, newStartTime + deltaTime)
+    rawNewStart = Math.min(rawNewStart, newEndTime - 0.1)
+    
+    if (snapActive) {
+      // 吸附检查（包含波形边界）
+      const searchRange = { start: rawNewStart - 1, end: newEndTime }
+      const snap = findSnapPoint(rawNewStart, excludeIds, 'start', searchRange)
+      if (snap.snapped && snap.time < newEndTime - 0.1) {
+        newStartTime = snap.time
+        snapLineX.value = timeToPixel(snap.time)
+        snapLineType.value = snap.snapType
+      } else {
+        newStartTime = rawNewStart
+        snapLineX.value = null
+        snapLineType.value = null
+      }
+    } else {
+      newStartTime = rawNewStart
+      snapLineX.value = null
+      snapLineType.value = null
+    }
   } else {
-    newEndTime = Math.min(props.duration, newEndTime + deltaTime)
-    newEndTime = Math.max(newEndTime, newStartTime + 0.1)
+    let rawNewEnd = Math.min(props.duration, newEndTime + deltaTime)
+    rawNewEnd = Math.max(rawNewEnd, newStartTime + 0.1)
+    
+    if (snapActive) {
+      // 吸附检查（包含波形边界）
+      const searchRange = { start: newStartTime, end: rawNewEnd + 1 }
+      const snap = findSnapPoint(rawNewEnd, excludeIds, 'end', searchRange)
+      if (snap.snapped && snap.time > newStartTime + 0.1) {
+        newEndTime = snap.time
+        snapLineX.value = timeToPixel(snap.time)
+        snapLineType.value = snap.snapType
+      } else {
+        newEndTime = rawNewEnd
+        snapLineX.value = null
+        snapLineType.value = null
+      }
+    } else {
+      newEndTime = rawNewEnd
+      snapLineX.value = null
+      snapLineType.value = null
+    }
   }
 
   emit('updateSubtitle', subtitle.id, secondsToTimestamp(newStartTime), secondsToTimestamp(newEndTime))
@@ -775,6 +1079,9 @@ const handleResizeEnd = () => {
   
   resizingSubtitle.value = null
   currentSubtitleId.value = null
+  // 清除吸附线
+  snapLineX.value = null
+  snapLineType.value = null
   document.removeEventListener('mousemove', handleResize)
   document.removeEventListener('mouseup', handleResizeEnd)
 }
@@ -1449,5 +1756,55 @@ defineExpose({
   font-size: 18px;
   color: #f56c6c;
   text-shadow: 0 0 4px rgba(245, 108, 108, 0.6);
+}
+
+/* 吸附参考线 */
+.snap-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  pointer-events: none;
+  z-index: 99;
+  transform: translateX(-1px);
+}
+
+.snap-line-bar {
+  position: absolute;
+  top: 30px;
+  bottom: 0;
+  width: 2px;
+  background: #10b981;
+  box-shadow: 0 0 6px rgba(16, 185, 129, 0.6);
+  animation: snap-pulse 0.6s ease-in-out infinite;
+}
+
+/* 波形吸附使用橙色 */
+.snap-line.snap-waveform .snap-line-bar {
+  background: #f59e0b;
+  box-shadow: 0 0 6px rgba(245, 158, 11, 0.6);
+  animation: snap-pulse-waveform 0.6s ease-in-out infinite;
+}
+
+@keyframes snap-pulse {
+  0%, 100% {
+    opacity: 1;
+    box-shadow: 0 0 6px rgba(16, 185, 129, 0.6);
+  }
+  50% {
+    opacity: 0.7;
+    box-shadow: 0 0 10px rgba(16, 185, 129, 0.8);
+  }
+}
+
+@keyframes snap-pulse-waveform {
+  0%, 100% {
+    opacity: 1;
+    box-shadow: 0 0 6px rgba(245, 158, 11, 0.6);
+  }
+  50% {
+    opacity: 0.7;
+    box-shadow: 0 0 10px rgba(245, 158, 11, 0.8);
+  }
 }
 </style>

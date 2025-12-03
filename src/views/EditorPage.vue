@@ -57,6 +57,8 @@ const subtitleItemRefs: Record<number, HTMLElement | null> = {}
 const isUserEditing = ref(false) // 标记是否是用户在编辑
 const isUserSelectingEntry = ref(false) // 标记用户是否在手动选择字幕
 const isScissorMode = ref(false) // 剪刀模式：分割字幕
+const isSnapEnabled = ref(false) // 吸附模式：拖拽时自动吸附
+const isAltPressed = ref(false) // Alt 键是否按下
 const showSearchPanel = ref(false) // 是否显示搜索面板
 const activePanel = ref<'list' | 'search'>('list') // 当前激活的面板
 const showSettingsDialog = ref(false) // 是否显示设置弹窗
@@ -297,6 +299,18 @@ watch(() => audioStore.playerState.currentTime, (currentTime) => {
 // 用于存储事件监听器的清理函数
 let unlistenOpenFile: (() => void) | null = null
 
+// Alt 键状态监听
+const handleAltKeyDown = (e: KeyboardEvent) => {
+  if (e.key === 'Alt') {
+    isAltPressed.value = true
+  }
+}
+const handleAltKeyUp = (e: KeyboardEvent) => {
+  if (e.key === 'Alt') {
+    isAltPressed.value = false
+  }
+}
+
 // 初始化时选中第一条字幕，设置菜单监听和快捷键
 onMounted(async () => {
   // 如果没有打开的 tab，跳转到欢迎页
@@ -328,6 +342,10 @@ onMounted(async () => {
     document.removeEventListener('keydown', handleKeydown, true)
     // 添加键盘快捷键监听（添加到 document 而不是 window，确保捕获所有键盘事件）
     document.addEventListener('keydown', handleKeydown, true)
+    
+    // 添加 Alt 键监听（用于吸附按钮状态显示）
+    document.addEventListener('keydown', handleAltKeyDown)
+    document.addEventListener('keyup', handleAltKeyUp)
   } catch (error) {
     console.error('Error setting up menu handlers:', error)
   }
@@ -345,6 +363,8 @@ onBeforeUnmount(() => {
   ;(window as any).__handleMenuSave = null
   // 移除键盘事件监听器
   document.removeEventListener('keydown', handleKeydown, true)
+  document.removeEventListener('keydown', handleAltKeyDown)
+  document.removeEventListener('keyup', handleAltKeyUp)
 })
 
 // 打开 SRT 文件
@@ -1382,6 +1402,10 @@ const handleKeydown = (e: KeyboardEvent) => {
     // x 键：开启/关闭分割模式
     e.preventDefault()
     handleScissor()
+  } else if ((e.key === 's' || e.key === 'S') && hasAudio.value) {
+    // s 键：开启/关闭吸附模式
+    e.preventDefault()
+    isSnapEnabled.value = !isSnapEnabled.value
   } else if (pressedKey === 'Cmd+,' || pressedKey === 'Ctrl+,') {
     // Command+逗号 或 Ctrl+逗号：打开设置
     e.preventDefault()
@@ -1482,6 +1506,7 @@ const handleKeydown = (e: KeyboardEvent) => {
         :is-generating-waveform="audioStore.isGeneratingWaveform"
         :waveform-progress="audioStore.waveformProgress"
         :scissor-mode="isScissorMode"
+        :snap-enabled="isSnapEnabled"
         @seek="handleWaveformSeek"
         @update-subtitle="handleSubtitleUpdate"
         @update-subtitles="handleSubtitlesUpdate"
@@ -1550,6 +1575,18 @@ const handleKeydown = (e: KeyboardEvent) => {
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M2 12h4l3-9 4 18 3-9h6"/>
+            </svg>
+          </button>
+          <button
+            class="sidebar-btn"
+            :class="{ active: isSnapEnabled, 'snap-paused': isSnapEnabled && isAltPressed }"
+            @click="isSnapEnabled = !isSnapEnabled"
+            :disabled="!hasAudio"
+            :title="isSnapEnabled && isAltPressed ? '吸附已暂停 (松开Alt恢复)' : '拖拽吸附 (S) 按住Alt临时禁用'"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 2v4M12 18v4M2 12h4M18 12h4"/>
+              <circle cx="12" cy="12" r="3"/>
             </svg>
           </button>
         </div>
@@ -2147,6 +2184,23 @@ const handleKeydown = (e: KeyboardEvent) => {
 
 .sidebar-btn.active .el-icon {
   color: #3b82f6;
+}
+
+.sidebar-btn.active svg {
+  color: #3b82f6;
+}
+
+/* 吸附暂停状态（Alt 键按下时） */
+.sidebar-btn.snap-paused {
+  background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+}
+
+.sidebar-btn.snap-paused::before {
+  background: linear-gradient(180deg, #f59e0b 0%, #d97706 100%);
+}
+
+.sidebar-btn.snap-paused svg {
+  color: #f59e0b;
 }
 
 .sidebar-btn:disabled {
