@@ -1463,6 +1463,12 @@ const handleKeydown = (e: KeyboardEvent) => {
     target instanceof HTMLTextAreaElement ||
     target instanceof HTMLInputElement
 
+  // 阻止 Backspace 键的浏览器后退行为（仅在非输入框内）
+  if (e.key === 'Backspace' && !isInTextInput) {
+    e.preventDefault()
+    return
+  }
+
   // 检查是否在搜索框内
   const isInSearchInput = target === searchInputRef.value?.$el?.querySelector('input')
 
