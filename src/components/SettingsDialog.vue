@@ -1,10 +1,15 @@
 <script setup lang="ts">
 import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import { ElMessage } from 'element-plus'
-import { useConfigStore } from '@/stores/config'
+import { useConfigStore, DEFAULT_PUNCTUATION } from '@/stores/config'
 import { Setting, Key, InfoFilled, ChatDotRound, Message, Document } from '@element-plus/icons-vue'
 import { open } from '@tauri-apps/plugin-shell'
 import { invoke } from '@tauri-apps/api/core'
+import {
+  CHINESE_PUNCTUATION,
+  ENGLISH_PUNCTUATION,
+  SPECIAL_PUNCTUATION,
+} from '@/utils/punctuation'
 
 const props = defineProps<{
   visible: boolean
@@ -137,6 +142,19 @@ const splitShortcut = (key: string): string[] => {
 // 应用版本
 const appVersion = '0.0.4'
 
+// 切换标点符号
+const togglePunctuation = (char: string) => {
+  if (configStore.punctuationToRemove.includes(char)) {
+    configStore.punctuationToRemove = configStore.punctuationToRemove
+      .split('')
+      .filter((c) => c !== char)
+      .join('')
+  } else {
+    configStore.punctuationToRemove += char
+  }
+  configStore.savePunctuation()
+}
+
 // 快捷键分类
 const shortcutCategories = computed(() => {
   const categories = [
@@ -214,50 +232,6 @@ const shortcutCategories = computed(() => {
               <div class="setting-group">
                 <div class="setting-item">
                   <div class="setting-info">
-                    <span class="setting-label">自动保存</span>
-                    <span class="setting-desc">编辑后自动保存字幕文件</span>
-                  </div>
-                  <el-switch
-                    v-model="configStore.config.autoSave"
-                    @change="configStore.saveConfig()"
-                  />
-                </div>
-
-                <div class="setting-item">
-                  <div class="setting-info">
-                    <span class="setting-label">自动滚动</span>
-                    <span class="setting-desc">播放时自动滚动到当前字幕</span>
-                  </div>
-                  <el-switch
-                    v-model="configStore.config.autoscroll"
-                    @change="configStore.saveConfig()"
-                  />
-                </div>
-
-                <div class="setting-item">
-                  <div class="setting-info">
-                    <span class="setting-label">显示波形</span>
-                    <span class="setting-desc">在时间轴上显示音频波形</span>
-                  </div>
-                  <el-switch
-                    v-model="configStore.config.showWaveform"
-                    @change="configStore.saveConfig()"
-                  />
-                </div>
-
-                <div class="setting-item">
-                  <div class="setting-info">
-                    <span class="setting-label">显示快捷键提示</span>
-                    <span class="setting-desc">在界面上显示快捷键提示</span>
-                  </div>
-                  <el-switch
-                    v-model="configStore.config.showKeyboardHints"
-                    @change="configStore.saveConfig()"
-                  />
-                </div>
-
-                <div class="setting-item">
-                  <div class="setting-info">
                     <span class="setting-label">新增字幕时长</span>
                     <span class="setting-desc">新增字幕的默认持续时间</span>
                   </div>
@@ -271,6 +245,63 @@ const shortcutCategories = computed(() => {
                       @change="configStore.saveConfig()"
                     />
                     <span class="duration-value">{{ configStore.config.newSubtitleDuration }}s</span>
+                  </div>
+                </div>
+
+                <div class="setting-item setting-item-vertical">
+                  <div class="setting-header">
+                    <div class="setting-info">
+                      <span class="setting-label">删除标点符号列表</span>
+                      <span class="setting-desc">点击符号切换选中状态，选中的符号会被删除</span>
+                    </div>
+                    <el-button 
+                      size="small" 
+                      @click="configStore.resetPunctuation()"
+                      :disabled="configStore.punctuationToRemove === DEFAULT_PUNCTUATION"
+                    >
+                      恢复默认
+                    </el-button>
+                  </div>
+                  
+                  <div class="punctuation-categories">
+                    <div class="punctuation-category">
+                      <span class="category-label">中文标点</span>
+                      <div class="punctuation-chars">
+                        <span 
+                          v-for="char in CHINESE_PUNCTUATION" 
+                          :key="char"
+                          class="punct-char"
+                          :class="{ active: configStore.punctuationToRemove.includes(char) }"
+                          @click="togglePunctuation(char)"
+                        >{{ char }}</span>
+                      </div>
+                    </div>
+                    
+                    <div class="punctuation-category">
+                      <span class="category-label">英文标点</span>
+                      <div class="punctuation-chars">
+                        <span 
+                          v-for="char in ENGLISH_PUNCTUATION" 
+                          :key="char"
+                          class="punct-char"
+                          :class="{ active: configStore.punctuationToRemove.includes(char) }"
+                          @click="togglePunctuation(char)"
+                        >{{ char }}</span>
+                      </div>
+                    </div>
+                    
+                    <div class="punctuation-category">
+                      <span class="category-label">特殊符号</span>
+                      <div class="punctuation-chars">
+                        <span 
+                          v-for="char in SPECIAL_PUNCTUATION" 
+                          :key="char"
+                          class="punct-char"
+                          :class="{ active: configStore.punctuationToRemove.includes(char) }"
+                          @click="togglePunctuation(char)"
+                        >{{ char }}</span>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -533,6 +564,71 @@ const shortcutCategories = computed(() => {
 
 .setting-item:last-child {
   border-bottom: none;
+}
+
+.setting-item-vertical {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+}
+
+.setting-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.punctuation-categories {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.punctuation-category {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.category-label {
+  font-size: 12px;
+  color: #888;
+  font-weight: 500;
+}
+
+.punctuation-chars {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.punct-char {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  height: 32px;
+  padding: 0 6px;
+  background: #f5f5f5;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  font-size: 15px;
+  font-family: monospace;
+  color: #666;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.punct-char:hover {
+  background: #eee;
+  border-color: #ccc;
+}
+
+.punct-char.active {
+  background: #e0f2fe;
+  border-color: #38bdf8;
+  color: #0284c7;
 }
 
 .setting-info {

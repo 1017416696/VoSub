@@ -13,6 +13,9 @@ export interface RecentFile {
 // 最大最近文件数量
 const MAX_RECENT_FILES = 10
 
+// 默认删除的标点符号
+export const DEFAULT_PUNCTUATION = `，。！？、；：""''（）《》【】…—,.!?;:'"()[]{}·~～@#$%^&*_+=|\\//<>`
+
 export const useConfigStore = defineStore('config', () => {
   // 编辑器配置
   const config = ref<EditorConfig>({
@@ -24,6 +27,28 @@ export const useConfigStore = defineStore('config', () => {
     language: 'zh-CN',
     newSubtitleDuration: 3,
   })
+
+  // 要删除的标点符号（用户可自定义）
+  const punctuationToRemove = ref<string>(DEFAULT_PUNCTUATION)
+
+  // 重置标点符号为默认值
+  const resetPunctuation = () => {
+    punctuationToRemove.value = DEFAULT_PUNCTUATION
+    savePunctuation()
+  }
+
+  // 保存标点符号配置
+  const savePunctuation = () => {
+    localStorage.setItem('srt-editor-punctuation', punctuationToRemove.value)
+  }
+
+  // 加载标点符号配置
+  const loadPunctuation = () => {
+    const saved = localStorage.getItem('srt-editor-punctuation')
+    if (saved !== null) {
+      punctuationToRemove.value = saved
+    }
+  }
 
   // 最近打开的文件列表
   const recentFiles = ref<RecentFile[]>([])
@@ -125,6 +150,7 @@ export const useConfigStore = defineStore('config', () => {
 
   // 初始化时加载配置
   loadConfig()
+  loadPunctuation()
 
   // 检测平台
   const isMac = () => typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.platform)
@@ -158,10 +184,13 @@ export const useConfigStore = defineStore('config', () => {
     keyBindings,
     keyboardShortcuts,
     recentFiles,
+    punctuationToRemove,
     updateConfig,
     saveConfig,
     loadConfig,
     addRecentFile,
     clearRecentFiles,
+    savePunctuation,
+    resetPunctuation,
   }
 })

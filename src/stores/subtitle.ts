@@ -709,7 +709,20 @@ export const useSubtitleStore = defineStore('subtitle', () => {
 
   // 移除标点符号
   const removePunctuationFromText = (text: string): string => {
-    return text.replace(/[，。！？、；：""''（）《》【】…—,.!?;:'"()\[\]{}]/g, '')
+    const configStore = useConfigStore()
+    const punctuation = configStore.punctuationToRemove || ''
+    logger.info('删除标点 - 配置', { punctuation, punctuationLength: punctuation.length })
+    if (!punctuation) {
+      logger.warn('删除标点 - 标点列表为空')
+      return text
+    }
+    // 逐字符删除，避免正则转义问题
+    let result = text
+    for (const char of punctuation) {
+      result = result.split(char).join('')
+    }
+    logger.info('删除标点 - 结果', { original: text, result })
+    return result
   }
 
   const removePunctuationForEntry = (entryId: number) => {
