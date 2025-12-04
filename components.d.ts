@@ -11,10 +11,16 @@ export {}
 /* prettier-ignore */
 declare module 'vue' {
   export interface GlobalComponents {
+    AudioEmptyState: typeof import('./src/components/editor/AudioEmptyState.vue')['default']
+    EditorSidebar: typeof import('./src/components/editor/EditorSidebar.vue')['default']
     GreetComponent: typeof import('./src/components/GreetComponent.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
+    SearchReplaceBar: typeof import('./src/components/editor/SearchReplaceBar.vue')['default']
     SettingsDialog: typeof import('./src/components/SettingsDialog.vue')['default']
+    SubtitleEditPanel: typeof import('./src/components/editor/SubtitleEditPanel.vue')['default']
+    SubtitleListPanel: typeof import('./src/components/editor/SubtitleListPanel.vue')['default']
+    TimelineControls: typeof import('./src/components/editor/TimelineControls.vue')['default']
     TitleBar: typeof import('./src/components/TitleBar.vue')['default']
     WaveformViewer: typeof import('./src/components/WaveformViewer.vue')['default']
   }

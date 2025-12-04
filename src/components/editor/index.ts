@@ -1,0 +1,6 @@
+export { default as EditorSidebar } from './EditorSidebar.vue'
+export { default as AudioEmptyState } from './AudioEmptyState.vue'
+export { default as TimelineControls } from './TimelineControls.vue'
+export { default as SubtitleListPanel } from './SubtitleListPanel.vue'
+export { default as SubtitleEditPanel } from './SubtitleEditPanel.vue'
+export { default as SearchReplaceBar } from './SearchReplaceBar.vue'
