@@ -62,6 +62,7 @@
               :style="getSubtitleStyle(subtitle)"
               @mousedown="handleSubtitleMouseDown($event, subtitle)"
               @dblclick="handleSubtitleDoubleClick(subtitle)"
+              @contextmenu.prevent="handleSubtitleContextMenu($event, subtitle)"
             >
               <!-- 左调整手柄 -->
               <div
@@ -131,6 +132,43 @@
         </div>
       </div>
     </div>
+
+    <!-- 右键菜单 -->
+    <Teleport to="body">
+      <div
+        v-if="contextMenu.visible"
+        class="context-menu"
+        :style="{ left: contextMenu.x + 'px', top: contextMenu.y + 'px' }"
+        @click.stop
+      >
+        <div class="context-menu-item" @click="handleContextMenuSplit">
+          <span class="context-menu-label">分割字幕</span>
+          <span class="context-menu-shortcut">X</span>
+        </div>
+        <div
+          class="context-menu-item"
+          :class="{ disabled: !canMergeSelected }"
+          @click="handleContextMenuMerge"
+        >
+          <span class="context-menu-label">合并字幕</span>
+          <span class="context-menu-shortcut">M</span>
+        </div>
+        <div class="context-menu-divider"></div>
+        <div class="context-menu-item" @click="handleContextMenuAlign">
+          <span class="context-menu-label">波形对齐</span>
+          <span class="context-menu-shortcut">A</span>
+        </div>
+        <div class="context-menu-divider"></div>
+        <div
+          class="context-menu-item"
+          :class="{ active: props.snapEnabled }"
+          @click="handleContextMenuToggleSnap"
+        >
+          <span class="context-menu-label">拖拽吸附</span>
+          <span class="context-menu-shortcut">S</span>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -172,6 +210,10 @@ const emit = defineEmits<{
   dragStart: [ids: number[]]
   dragEnd: []
   deleteSelectedSubtitles: [ids: number[]]
+  mergeSubtitles: []
+  alignToWaveform: []
+  toggleSnap: []
+  enterScissorMode: []
 }>()
 
 // Refs
@@ -257,6 +299,24 @@ const visibleSubtitles = computed(() => {
 
 // 剪刀模式参考线位置
 const scissorLineX = ref<number | null>(null)
+
+// 右键菜单状态
+const contextMenu = ref<{
+  visible: boolean
+  x: number
+  y: number
+  subtitleId: number | null
+}>({
+  visible: false,
+  x: 0,
+  y: 0,
+  subtitleId: null
+})
+
+// 计算是否可以合并（选中了多个字幕）
+const canMergeSelected = computed(() => {
+  return selectedSubtitleIds.value.size >= 2
+})
 
 // 吸附功能相关
 const SNAP_THRESHOLD_PX = 8 // 吸附阈值（像素）
@@ -911,6 +971,64 @@ const handleWheel = (event: WheelEvent) => {
 const handleSubtitleDoubleClick = (subtitle: SubtitleEntry) => {
   // 发送双击事件，告诉父组件选中此字幕并跳转到编辑区
   emit('doubleClickSubtitle', subtitle.id)
+}
+
+// Handle subtitle right click - show context menu
+const handleSubtitleContextMenu = (event: MouseEvent, subtitle: SubtitleEntry) => {
+  event.preventDefault()
+  event.stopPropagation()
+  
+  // 如果右键点击的字幕不在选中列表中，先选中它
+  if (!selectedSubtitleIds.value.has(subtitle.id)) {
+    selectedSubtitleIds.value.clear()
+    selectedSubtitleIds.value.add(subtitle.id)
+    emit('selectSubtitles', [subtitle.id])
+  }
+  
+  // 显示右键菜单
+  contextMenu.value = {
+    visible: true,
+    x: event.clientX,
+    y: event.clientY,
+    subtitleId: subtitle.id
+  }
+  
+  // 添加全局点击监听，点击其他地方关闭菜单
+  setTimeout(() => {
+    document.addEventListener('click', closeContextMenu)
+    document.addEventListener('contextmenu', closeContextMenu)
+  }, 0)
+}
+
+// Close context menu
+const closeContextMenu = () => {
+  contextMenu.value.visible = false
+  contextMenu.value.subtitleId = null
+  document.removeEventListener('click', closeContextMenu)
+  document.removeEventListener('contextmenu', closeContextMenu)
+}
+
+// Context menu actions
+const handleContextMenuSplit = () => {
+  closeContextMenu()
+  // 进入剪刀模式
+  emit('enterScissorMode')
+}
+
+const handleContextMenuMerge = () => {
+  if (!canMergeSelected.value) return
+  closeContextMenu()
+  emit('mergeSubtitles')
+}
+
+const handleContextMenuAlign = () => {
+  closeContextMenu()
+  emit('alignToWaveform')
+}
+
+const handleContextMenuToggleSnap = () => {
+  closeContextMenu()
+  emit('toggleSnap')
 }
 
 // Subtitle dragging
@@ -2218,5 +2336,61 @@ defineExpose({
     opacity: 0.7;
     box-shadow: 0 0 10px rgba(245, 158, 11, 0.8);
   }
+}
+
+/* 右键菜单样式 */
+.context-menu {
+  position: fixed;
+  min-width: 140px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12), 0 2px 4px rgba(0, 0, 0, 0.08);
+  padding: 6px 0;
+  z-index: 10000;
+  font-size: 13px;
+}
+
+.context-menu-item {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+  color: #334155;
+}
+
+.context-menu-item:hover {
+  background: #f1f5f9;
+}
+
+.context-menu-item.disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.context-menu-item.disabled:hover {
+  background: transparent;
+}
+
+.context-menu-item.active {
+  background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+  color: #3b82f6;
+}
+
+.context-menu-label {
+  flex: 1;
+}
+
+.context-menu-shortcut {
+  margin-left: 16px;
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.context-menu-divider {
+  height: 1px;
+  background: #e2e8f0;
+  margin: 4px 8px;
 }
 </style>

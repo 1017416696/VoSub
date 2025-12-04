@@ -808,6 +808,10 @@ onBeforeUnmount(() => {
         @drag-start="handleDragStart"
         @drag-end="handleDragEnd"
         @delete-selected-subtitles="handleDeleteSelectedSubtitles"
+        @merge-subtitles="handleMergeSubtitles"
+        @align-to-waveform="handleAlignToWaveform"
+        @toggle-snap="isSnapEnabled = !isSnapEnabled"
+        @enter-scissor-mode="isScissorMode = true"
       />
     </div>
 
