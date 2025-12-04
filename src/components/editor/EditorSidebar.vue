@@ -67,7 +67,7 @@ const emit = defineEmits<{
         class="sidebar-btn"
         @click="emit('align-to-waveform')"
         :disabled="!hasAudio || !hasCurrentEntry"
-        title="波形对齐 (A)"
+        title="对齐波形 (A)"
       >
         <el-icon><Guide /></el-icon>
       </button>

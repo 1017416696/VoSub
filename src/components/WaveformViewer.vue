@@ -155,7 +155,7 @@
         </div>
         <div class="context-menu-divider"></div>
         <div class="context-menu-item" @click="handleContextMenuAlign">
-          <span class="context-menu-label">波形对齐</span>
+          <span class="context-menu-label">对齐波形</span>
           <span class="context-menu-shortcut">A</span>
         </div>
         <div class="context-menu-divider"></div>
