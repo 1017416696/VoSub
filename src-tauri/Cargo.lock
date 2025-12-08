@@ -4026,6 +4026,7 @@ dependencies = [
  "dirs 5.0.1",
  "hound",
  "log",
+ "once_cell",
  "reqwest",
  "serde",
  "serde_json",

@@ -4,7 +4,7 @@ mod whisper_transcriber;
 
 use srt_parser::{read_srt_file, write_srt_file, SRTFile, SubtitleEntry};
 use whisper_transcriber::{
-    get_available_models, download_model, delete_model, transcribe_audio, WhisperModelInfo,
+    get_available_models, download_model, delete_model, transcribe_audio, cancel_transcription, WhisperModelInfo,
 };
 use waveform_generator::{generate_waveform_with_progress, ProgressCallback};
 use std::fs;
@@ -155,6 +155,12 @@ async fn transcribe_audio_to_subtitles(
 #[tauri::command]
 fn delete_whisper_model(model_size: String) -> Result<String, String> {
     delete_model(&model_size)
+}
+
+/// 取消转录任务
+#[tauri::command]
+fn cancel_transcription_task() {
+    cancel_transcription();
 }
 
 /// 打开模型目录
@@ -630,7 +636,8 @@ pub fn run() {
             download_whisper_model,
             delete_whisper_model,
             open_whisper_model_dir,
-            transcribe_audio_to_subtitles
+            transcribe_audio_to_subtitles,
+            cancel_transcription_task
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -39,6 +39,7 @@ const availableModels = ref<WhisperModelInfo[]>([])
 const isTranscribing = ref(false)
 const transcriptionProgress = ref(0)
 const transcriptionMessage = ref('')
+const isCancelled = ref(false)
 
 // 已下载的模型
 const downloadedModels = computed(() => availableModels.value.filter(m => m.downloaded))
@@ -50,6 +51,45 @@ const currentModelName = computed(() => {
   // 如果默认模型未下载，显示第一个已下载的模型或 base
   const firstDownloaded = downloadedModels.value[0]
   return firstDownloaded?.name || 'base'
+})
+
+// 是否显示下载进度（下载模型时有真实进度）
+const isDownloading = computed(() => {
+  return transcriptionMessage.value.includes('Downloading') || transcriptionMessage.value.includes('下载')
+})
+
+// 本地化消息
+const localizedMessage = computed(() => {
+  const msg = transcriptionMessage.value
+  if (!msg) return '准备中...'
+  
+  // 英文消息映射到中文
+  const messageMap: Record<string, string> = {
+    'Loading audio file...': '正在加载音频文件...',
+    'Loading Whisper model...': '正在加载语音模型...',
+    'Transcribing audio...': '正在识别语音内容...',
+    'Converting to subtitles...': '正在生成字幕...',
+  }
+  
+  // 检查是否包含下载进度
+  if (msg.includes('Downloading')) {
+    const match = msg.match(/Downloading (\w+) model\.\.\. ([\d.]+)%/)
+    if (match) {
+      return `正在下载 ${match[1]} 模型... ${match[2]}%`
+    }
+    return '正在下载模型...'
+  }
+  
+  // 检查完成消息
+  if (msg.includes('completed') || msg.includes('Generated')) {
+    const match = msg.match(/Generated (\d+) subtitles/)
+    if (match) {
+      return `转录完成！生成了 ${match[1]} 条字幕`
+    }
+    return '转录完成！'
+  }
+  
+  return messageMap[msg] || msg
 })
 
 
@@ -199,6 +239,7 @@ const startTranscription = async () => {
     }
 
     isTranscribing.value = true
+    isCancelled.value = false
     transcriptionProgress.value = 0
     transcriptionMessage.value = '正在转录音频...'
     showTranscriptionDialog.value = true
@@ -208,6 +249,10 @@ const startTranscription = async () => {
       modelSize: configStore.whisperModel,
       language: configStore.whisperLanguage,
     })
+    
+    // 如果已取消，不处理结果
+    if (isCancelled.value) return
+    
     const fileName = selected.split('/').pop() || 'transcription.srt'
     await subtitleStore.loadSRTFile({ name: fileName.replace(/\.[^.]+$/, '.srt'), path: '', entries, encoding: 'UTF-8' })
     isTranscribing.value = false
@@ -217,11 +262,27 @@ const startTranscription = async () => {
   } catch (error) {
     isTranscribing.value = false
     showTranscriptionDialog.value = false
-    await ElMessageBox.alert(`转录失败：${error instanceof Error ? error.message : '未知错误'}`, '转录失败', { confirmButtonText: '确定', type: 'error' })
+    // 如果是用户取消的，不显示错误弹窗
+    if (isCancelled.value) return
+    const errorMsg = error instanceof Error ? error.message : String(error)
+    // 检查是否是取消导致的错误
+    if (errorMsg.includes('取消') || errorMsg.includes('cancel')) return
+    await ElMessageBox.alert(`转录失败：${errorMsg}`, '转录失败', { confirmButtonText: '确定', type: 'error' })
   }
 }
 
-const cancelTranscription = () => { showTranscriptionDialog.value = false; isTranscribing.value = false }
+const cancelTranscription = async () => {
+  // 标记为已取消
+  isCancelled.value = true
+  // 调用后端取消转录
+  try {
+    await invoke('cancel_transcription_task')
+  } catch (e) {
+    console.error('取消转录失败:', e)
+  }
+  showTranscriptionDialog.value = false
+  isTranscribing.value = false
+}
 
 const onSelectModel = (modelName: string) => {
   configStore.whisperModel = modelName
@@ -306,13 +367,75 @@ const onSelectModel = (modelName: string) => {
     </div>
 
     <!-- 转录进度对话框 -->
-    <el-dialog v-model="showTranscriptionDialog" title="音频转录" :close-on-click-modal="false" :close-on-press-escape="false" :show-close="!isTranscribing" width="400px">
-      <div v-if="isTranscribing" class="progress-content">
-        <el-progress :percentage="Math.round(transcriptionProgress)" :stroke-width="10" />
-        <p class="progress-message">{{ transcriptionMessage }}</p>
+    <el-dialog 
+      v-model="showTranscriptionDialog" 
+      :close-on-click-modal="false" 
+      :close-on-press-escape="false" 
+      :show-close="false"
+      width="420px"
+      class="transcription-dialog"
+      :class="{ 'is-transcribing': isTranscribing }"
+    >
+      <div class="transcription-content">
+        <!-- 关闭按钮 -->
+        <button class="close-btn" @click="cancelTranscription">
+          <i class="i-mdi-close"></i>
+        </button>
+        
+        <!-- 动画图标区域 -->
+        <div class="transcription-animation">
+          <div class="audio-wave">
+            <span class="wave-bar"></span>
+            <span class="wave-bar"></span>
+            <span class="wave-bar"></span>
+            <span class="wave-bar"></span>
+            <span class="wave-bar"></span>
+          </div>
+          <div class="pulse-ring"></div>
+          <div class="pulse-ring delay-1"></div>
+          <div class="pulse-ring delay-2"></div>
+        </div>
+        
+        <!-- 进度信息 -->
+        <div class="progress-info">
+          <!-- 下载时显示真实进度条 -->
+          <template v-if="isDownloading">
+            <div class="progress-bar-container">
+              <div class="progress-bar-track">
+                <div 
+                  class="progress-bar-fill" 
+                  :style="{ width: `${Math.round(transcriptionProgress)}%` }"
+                ></div>
+                <div 
+                  class="progress-bar-glow" 
+                  :style="{ left: `${Math.round(transcriptionProgress)}%` }"
+                ></div>
+              </div>
+            </div>
+            <div class="progress-stats">
+              <span class="progress-percentage">{{ Math.round(transcriptionProgress) }}%</span>
+              <span class="progress-status">{{ localizedMessage }}</span>
+            </div>
+          </template>
+          <!-- 转录时只显示状态文字 -->
+          <template v-else>
+            <p class="transcription-status">{{ localizedMessage }}</p>
+          </template>
+        </div>
+        
+        <!-- 提示信息 -->
+        <p class="transcription-hint">
+          <i class="i-mdi-information-outline"></i>
+          {{ transcriptionMessage.includes('下载') ? '首次使用需要下载模型，请耐心等待' : '转录时间取决于音频长度和模型大小' }}
+        </p>
       </div>
+      
       <template #footer>
-        <el-button v-if="!isTranscribing" @click="cancelTranscription">取消</el-button>
+        <div class="dialog-footer">
+          <el-button type="default" @click="cancelTranscription">
+            取消转录
+          </el-button>
+        </div>
       </template>
     </el-dialog>
   </div>
@@ -641,17 +764,223 @@ const onSelectModel = (modelName: string) => {
 }
 
 /* 转录对话框 */
-.progress-content {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  padding: 0.5rem 0;
+:deep(.transcription-dialog) {
+  .el-dialog__header {
+    display: none;
+  }
+  .el-dialog__body {
+    padding: 0;
+  }
+  .el-dialog__footer {
+    padding: 0 24px 20px;
+    border-top: none;
+  }
+  .el-dialog {
+    border-radius: 16px;
+    overflow: hidden;
+  }
 }
 
-.progress-message {
-  font-size: 13px;
-  color: #666;
+.transcription-content {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 32px 24px 24px;
+  background: linear-gradient(180deg, #f0f7ff 0%, #fff 100%);
+}
+
+/* 关闭按钮 */
+.close-btn {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  color: #909399;
+  transition: all 0.15s ease;
+}
+
+.close-btn:hover {
+  background: rgba(0, 0, 0, 0.06);
+  color: #606266;
+}
+
+.close-btn i {
+  font-size: 18px;
+}
+
+/* 动画区域 */
+.transcription-animation {
+  position: relative;
+  width: 80px;
+  height: 80px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 20px;
+}
+
+/* 音频波形动画 */
+.audio-wave {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  z-index: 2;
+}
+
+.wave-bar {
+  width: 4px;
+  height: 20px;
+  background: linear-gradient(180deg, #409eff 0%, #79bbff 100%);
+  border-radius: 2px;
+  animation: wave 1.2s ease-in-out infinite;
+}
+
+.wave-bar:nth-child(1) { animation-delay: 0s; height: 16px; }
+.wave-bar:nth-child(2) { animation-delay: 0.1s; height: 24px; }
+.wave-bar:nth-child(3) { animation-delay: 0.2s; height: 32px; }
+.wave-bar:nth-child(4) { animation-delay: 0.3s; height: 24px; }
+.wave-bar:nth-child(5) { animation-delay: 0.4s; height: 16px; }
+
+@keyframes wave {
+  0%, 100% { transform: scaleY(0.5); opacity: 0.6; }
+  50% { transform: scaleY(1); opacity: 1; }
+}
+
+/* 脉冲环动画 */
+.pulse-ring {
+  position: absolute;
+  width: 60px;
+  height: 60px;
+  border: 2px solid rgba(64, 158, 255, 0.3);
+  border-radius: 50%;
+  animation: pulse 2s ease-out infinite;
+}
+
+.pulse-ring.delay-1 { animation-delay: 0.6s; }
+.pulse-ring.delay-2 { animation-delay: 1.2s; }
+
+@keyframes pulse {
+  0% {
+    transform: scale(1);
+    opacity: 0.6;
+  }
+  100% {
+    transform: scale(2);
+    opacity: 0;
+  }
+}
+
+
+
+/* 进度信息 */
+.progress-info {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.progress-bar-container {
+  width: 100%;
+  position: relative;
+}
+
+.progress-bar-track {
+  width: 100%;
+  height: 8px;
+  background: #e4e7ed;
+  border-radius: 4px;
+  overflow: visible;
+  position: relative;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #409eff 0%, #79bbff 100%);
+  border-radius: 4px;
+  transition: width 0.3s ease;
+  position: relative;
+}
+
+
+
+.progress-bar-glow {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 12px;
+  height: 12px;
+  background: #409eff;
+  border-radius: 50%;
+  box-shadow: 0 0 12px rgba(64, 158, 255, 0.6);
+  transition: left 0.3s ease;
+}
+
+.progress-stats {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.progress-percentage {
+  font-size: 24px;
+  font-weight: 700;
+  color: #409eff;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 转录状态文字 */
+.transcription-status {
+  font-size: 14px;
+  color: #606266;
   text-align: center;
   margin: 0;
+}
+
+.progress-status {
+  font-size: 13px;
+  color: #909399;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 提示信息 */
+.transcription-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 20px 0 0;
+  padding: 10px 14px;
+  background: rgba(64, 158, 255, 0.08);
+  border-radius: 8px;
+  font-size: 12px;
+  color: #606266;
+}
+
+.transcription-hint i {
+  font-size: 16px;
+  color: #409eff;
+  flex-shrink: 0;
+}
+
+/* 对话框底部 */
+.dialog-footer {
+  display: flex;
+  justify-content: center;
+}
+
+.dialog-footer .el-button {
+  min-width: 100px;
 }
 </style>

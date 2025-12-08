@@ -2,6 +2,8 @@ use crate::srt_parser::{SubtitleEntry, TimeStamp};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::fs;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use tauri::{Window, Emitter};
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 use symphonia::core::audio::{AudioBufferRef, Signal};
@@ -10,6 +12,25 @@ use symphonia::core::formats::FormatOptions;
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
+use once_cell::sync::Lazy;
+
+// 全局取消标志
+static TRANSCRIPTION_CANCELLED: Lazy<Arc<AtomicBool>> = Lazy::new(|| Arc::new(AtomicBool::new(false)));
+
+/// 取消当前转录任务
+pub fn cancel_transcription() {
+    TRANSCRIPTION_CANCELLED.store(true, Ordering::SeqCst);
+}
+
+/// 重置取消标志
+fn reset_cancellation() {
+    TRANSCRIPTION_CANCELLED.store(false, Ordering::SeqCst);
+}
+
+/// 检查是否已取消
+fn is_cancelled() -> bool {
+    TRANSCRIPTION_CANCELLED.load(Ordering::SeqCst)
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TranscriptionProgress {
@@ -328,6 +349,9 @@ pub async fn transcribe_audio(
     language: String,
     window: Window,
 ) -> Result<Vec<SubtitleEntry>, String> {
+    // 重置取消标志
+    reset_cancellation();
+    
     // Check if model is downloaded
     if !is_model_downloaded(&model_size)? {
         return Err(format!(
@@ -345,8 +369,18 @@ pub async fn transcribe_audio(
         status: "loading".to_string(),
     });
 
+    // 检查是否取消
+    if is_cancelled() {
+        return Err("转录已取消".to_string());
+    }
+
     // Load audio file
     let samples = read_audio_file_symphonia(&audio_path)?;
+
+    // 检查是否取消
+    if is_cancelled() {
+        return Err("转录已取消".to_string());
+    }
 
     // Emit progress
     let _ = window.emit("transcription-progress", TranscriptionProgress {
@@ -361,6 +395,11 @@ pub async fn transcribe_audio(
         WhisperContextParameters::default(),
     )
     .map_err(|e| format!("Failed to load Whisper model: {}", e))?;
+
+    // 检查是否取消
+    if is_cancelled() {
+        return Err("转录已取消".to_string());
+    }
 
     // Create transcription parameters
     let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
@@ -386,6 +425,11 @@ pub async fn transcribe_audio(
         .full(params, &samples)
         .map_err(|e| format!("Failed to transcribe: {}", e))?;
 
+    // 检查是否取消（转录完成后）
+    if is_cancelled() {
+        return Err("转录已取消".to_string());
+    }
+
     // Emit progress
     let _ = window.emit("transcription-progress", TranscriptionProgress {
         progress: 80.0,
@@ -399,6 +443,11 @@ pub async fn transcribe_audio(
     let mut entries = Vec::new();
 
     for i in 0..num_segments {
+        // 检查是否取消
+        if is_cancelled() {
+            return Err("转录已取消".to_string());
+        }
+        
         let segment = state
             .get_segment(i)
             .ok_or_else(|| format!("Failed to get segment {}", i))?;
@@ -434,6 +483,11 @@ pub async fn transcribe_audio(
             end_time,
             text: segment_text.trim().to_string(),
         });
+    }
+
+    // 最后检查是否取消
+    if is_cancelled() {
+        return Err("转录已取消".to_string());
     }
 
     // Emit completion
