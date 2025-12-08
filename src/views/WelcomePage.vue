@@ -5,12 +5,26 @@ import { open } from '@tauri-apps/plugin-dialog'
 import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'
 import { getCurrentWindow } from '@tauri-apps/api/window'
+import { listen } from '@tauri-apps/api/event'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Document, Headset, Clock } from '@element-plus/icons-vue'
+import { Document, Headset, Clock, Microphone } from '@element-plus/icons-vue'
 import { useSubtitleStore } from '@/stores/subtitle'
 import { useAudioStore } from '@/stores/audio'
 import { useConfigStore } from '@/stores/config'
-import type { SRTFile, AudioFile } from '@/types/subtitle'
+import type { SRTFile, AudioFile, SubtitleEntry } from '@/types/subtitle'
+
+interface WhisperModelInfo {
+  name: string
+  size: string
+  downloaded: boolean
+  path?: string
+}
+
+interface TranscriptionProgress {
+  progress: number
+  current_text: string
+  status: string
+}
 
 const router = useRouter()
 const subtitleStore = useSubtitleStore()
@@ -44,6 +58,15 @@ const droppedFiles = ref<{ srt: string | null; audio: string | null }>({
   audio: null,
 })
 
+// 转录相关状态
+const showTranscriptionDialog = ref(false)
+const availableModels = ref<WhisperModelInfo[]>([])
+const selectedModel = ref('base')
+const selectedLanguage = ref('zh')
+const isTranscribing = ref(false)
+const transcriptionProgress = ref(0)
+const transcriptionMessage = ref('')
+
 // 监听 Tauri 的文件拖放事件
 let unlistenFileDrop: (() => void) | null = null
 
@@ -63,6 +86,24 @@ onMounted(async () => {
   })
 
   unlistenFileDrop = unlistenHover
+
+  // 监听转录进度
+  const unlistenProgress = await listen<TranscriptionProgress>('transcription-progress', (event) => {
+    transcriptionProgress.value = event.payload.progress
+    transcriptionMessage.value = event.payload.current_text
+  })
+
+  // 在组件卸载时取消监听
+  onUnmounted(() => {
+    unlistenProgress()
+  })
+
+  // 加载可用模型列表
+  try {
+    availableModels.value = await invoke<WhisperModelInfo[]>('get_whisper_models')
+  } catch (error) {
+    console.error('Failed to load models:', error)
+  }
 })
 
 onUnmounted(() => {
@@ -307,6 +348,145 @@ const onTitlebarDoubleClick = async () => {
   }
 }
 
+// 打开音频转录对话框
+const openTranscriptionDialog = async () => {
+  try {
+    const selected = await open({
+      multiple: false,
+      filters: [
+        {
+          name: '音频文件',
+          extensions: ['mp3', 'wav', 'ogg', 'flac', 'm4a', 'aac'],
+        },
+      ],
+    })
+
+    if (selected && typeof selected === 'string') {
+      showTranscriptionDialog.value = true
+    }
+  } catch (error) {
+    await ElMessageBox.alert('无法打开文件选择器', '错误', {
+      confirmButtonText: '确定',
+      type: 'error',
+    })
+  }
+}
+
+// 开始转录
+const startTranscription = async () => {
+  try {
+    // 选择音频文件
+    const selected = await open({
+      multiple: false,
+      filters: [
+        {
+          name: '音频文件',
+          extensions: ['mp3', 'wav', 'ogg', 'flac', 'm4a', 'aac'],
+        },
+      ],
+    })
+
+    if (!selected || typeof selected !== 'string') {
+      return
+    }
+
+    // 检查模型是否已下载
+    const model = availableModels.value.find(m => m.name === selectedModel.value)
+    if (model && !model.downloaded) {
+      const confirm = await ElMessageBox.confirm(
+        `模型 ${selectedModel.value} (${model.size}) 尚未下载，是否现在下载？`,
+        '需要下载模型',
+        {
+          confirmButtonText: '下载',
+          cancelButtonText: '取消',
+          type: 'info',
+        }
+      ).catch(() => false)
+
+      if (!confirm) {
+        return
+      }
+
+      // 下载模型
+      isTranscribing.value = true
+      transcriptionProgress.value = 0
+      transcriptionMessage.value = '正在下载模型...'
+      showTranscriptionDialog.value = true
+
+      try {
+        await invoke('download_whisper_model', {
+          modelSize: selectedModel.value,
+        })
+
+        // 更新模型列表
+        availableModels.value = await invoke<WhisperModelInfo[]>('get_whisper_models')
+      } catch (error) {
+        isTranscribing.value = false
+        showTranscriptionDialog.value = false
+        await ElMessageBox.alert(
+          `下载模型失败：${error instanceof Error ? error.message : '未知错误'}`,
+          '下载失败',
+          {
+            confirmButtonText: '确定',
+            type: 'error',
+          }
+        )
+        return
+      }
+    }
+
+    // 开始转录
+    isTranscribing.value = true
+    transcriptionProgress.value = 0
+    transcriptionMessage.value = '正在转录音频...'
+    showTranscriptionDialog.value = true
+
+    const entries = await invoke<SubtitleEntry[]>('transcribe_audio_to_subtitles', {
+      audioPath: selected,
+      modelSize: selectedModel.value,
+      language: selectedLanguage.value,
+    })
+
+    // 转录成功，加载字幕
+    const fileName = selected.split('/').pop() || 'transcription.srt'
+    const srtFile: SRTFile = {
+      name: fileName.replace(/\.[^.]+$/, '.srt'),
+      path: '',
+      entries,
+      encoding: 'UTF-8',
+    }
+
+    await subtitleStore.loadSRTFile(srtFile)
+
+    // 跳转到编辑器
+    isTranscribing.value = false
+    showTranscriptionDialog.value = false
+
+    ElMessage.success(`转录成功！生成了 ${entries.length} 条字幕`)
+
+    setTimeout(() => {
+      router.push('/editor')
+    }, 500)
+  } catch (error) {
+    isTranscribing.value = false
+    showTranscriptionDialog.value = false
+    await ElMessageBox.alert(
+      `转录失败：${error instanceof Error ? error.message : '未知错误'}`,
+      '转录失败',
+      {
+        confirmButtonText: '确定',
+        type: 'error',
+      }
+    )
+  }
+}
+
+// 取消转录
+const cancelTranscription = () => {
+  showTranscriptionDialog.value = false
+  isTranscribing.value = false
+}
+
 
 </script>
 
@@ -370,6 +550,19 @@ const onTitlebarDoubleClick = async () => {
           </button>
         </div>
 
+        <!-- 音频转录按钮 -->
+        <div class="transcription-section">
+          <button
+            class="action-btn transcription"
+            :disabled="isLoading"
+            @click="startTranscription"
+          >
+            <el-icon><Microphone /></el-icon>
+            <span>音频转录成字幕</span>
+          </button>
+          <p class="transcription-hint">使用 AI 模型将音频自动转录为字幕文件</p>
+        </div>
+
         <!-- 提示信息 -->
         <p class="tip-text">
           提示：可单独加载 SRT 文件编辑，或同时加载音频以同步调整时间轴
@@ -419,6 +612,31 @@ const onTitlebarDoubleClick = async () => {
         </div>
       </div>
     </div>
+
+    <!-- 转录进度对话框 -->
+    <el-dialog
+      v-model="showTranscriptionDialog"
+      title="音频转录"
+      :close-on-click-modal="false"
+      :close-on-press-escape="false"
+      :show-close="!isTranscribing"
+      width="500px"
+    >
+      <div class="transcription-dialog">
+        <div v-if="isTranscribing" class="progress-content">
+          <el-progress
+            :percentage="Math.round(transcriptionProgress)"
+            :stroke-width="12"
+            :status="transcriptionProgress >= 100 ? 'success' : undefined"
+          />
+          <p class="progress-message">{{ transcriptionMessage }}</p>
+        </div>
+      </div>
+
+      <template #footer>
+        <el-button v-if="!isTranscribing" @click="cancelTranscription">取消</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -673,6 +891,56 @@ const onTitlebarDoubleClick = async () => {
   text-align: center;
   user-select: none;
   -webkit-user-select: none;
+}
+
+/* 转录区域 */
+.transcription-section {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid #e5e7eb;
+}
+
+.action-btn.transcription {
+  width: 100%;
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: white;
+  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);
+}
+
+.action-btn.transcription:hover:not(:disabled) {
+  background: linear-gradient(135deg, #059669 0%, #047857 100%);
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4);
+}
+
+.transcription-hint {
+  font-size: 11px;
+  color: #9ca3af;
+  margin: 0;
+  text-align: center;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* 转录对话框 */
+.transcription-dialog {
+  padding: 1rem 0;
+}
+
+.progress-content {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.progress-message {
+  font-size: 14px;
+  color: #6b7280;
+  text-align: center;
+  margin: 0;
 }
 
 /* 快捷键栏 */

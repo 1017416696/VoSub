@@ -1,10 +1,13 @@
 mod srt_parser;
 mod waveform_generator;
+mod whisper_transcriber;
 
 use srt_parser::{read_srt_file, write_srt_file, SRTFile, SubtitleEntry};
+use whisper_transcriber::{
+    get_available_models, download_model, transcribe_audio, WhisperModelInfo,
+};
 use waveform_generator::{generate_waveform_with_progress, ProgressCallback};
 use std::fs;
-use std::path::PathBuf;
 use tauri::menu::{MenuBuilder, MenuItem, PredefinedMenuItem, SubmenuBuilder};
 use tauri::{Emitter, Manager};
 use tauri_plugin_prevent_default::Flags;
@@ -94,7 +97,7 @@ fn get_log_path(app_handle: tauri::AppHandle) -> Result<String, String> {
 #[tauri::command]
 fn show_log_in_folder(app_handle: tauri::AppHandle) -> Result<(), String> {
     let log_dir = app_handle.path().app_log_dir().map_err(|e| e.to_string())?;
-    
+
     #[cfg(target_os = "macos")]
     {
         std::process::Command::new("open")
@@ -102,7 +105,7 @@ fn show_log_in_folder(app_handle: tauri::AppHandle) -> Result<(), String> {
             .spawn()
             .map_err(|e| e.to_string())?;
     }
-    
+
     #[cfg(target_os = "windows")]
     {
         std::process::Command::new("explorer")
@@ -110,7 +113,7 @@ fn show_log_in_folder(app_handle: tauri::AppHandle) -> Result<(), String> {
             .spawn()
             .map_err(|e| e.to_string())?;
     }
-    
+
     #[cfg(target_os = "linux")]
     {
         std::process::Command::new("xdg-open")
@@ -118,12 +121,39 @@ fn show_log_in_folder(app_handle: tauri::AppHandle) -> Result<(), String> {
             .spawn()
             .map_err(|e| e.to_string())?;
     }
-    
+
     Ok(())
+}
+
+/// 获取可用的 Whisper 模型列表
+#[tauri::command]
+fn get_whisper_models() -> Result<Vec<WhisperModelInfo>, String> {
+    get_available_models()
+}
+
+/// 下载 Whisper 模型
+#[tauri::command]
+async fn download_whisper_model(
+    window: tauri::Window,
+    model_size: String,
+) -> Result<String, String> {
+    download_model(&model_size, window).await
+}
+
+/// 转录音频文件为字幕
+#[tauri::command]
+async fn transcribe_audio_to_subtitles(
+    window: tauri::Window,
+    audio_path: String,
+    model_size: String,
+    language: String,
+) -> Result<Vec<SubtitleEntry>, String> {
+    transcribe_audio(audio_path, model_size, language, window).await
 }
 
 /// 最近文件信息
 #[derive(serde::Deserialize, Clone)]
+#[allow(dead_code)]
 struct RecentFileInfo {
     path: String,
     name: String,
@@ -548,7 +578,20 @@ pub fn run() {
                 .level_for("symphonia_metadata", log::LevelFilter::Warn)
                 .build(),
         )
-        .invoke_handler(tauri::generate_handler![greet, read_srt, write_srt, read_audio_file, generate_audio_waveform, trigger_open_file, update_recent_files_menu, get_log_path, show_log_in_folder])
+        .invoke_handler(tauri::generate_handler![
+            greet,
+            read_srt,
+            write_srt,
+            read_audio_file,
+            generate_audio_waveform,
+            trigger_open_file,
+            update_recent_files_menu,
+            get_log_path,
+            show_log_in_folder,
+            get_whisper_models,
+            download_whisper_model,
+            transcribe_audio_to_subtitles
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
