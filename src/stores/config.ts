@@ -31,6 +31,10 @@ export const useConfigStore = defineStore('config', () => {
   // 要删除的标点符号（用户可自定义）
   const punctuationToRemove = ref<string>(DEFAULT_PUNCTUATION)
 
+  // Whisper 语音转录设置
+  const whisperModel = ref<string>('base')
+  const whisperLanguage = ref<string>('zh')
+
   // 重置标点符号为默认值
   const resetPunctuation = () => {
     punctuationToRemove.value = DEFAULT_PUNCTUATION
@@ -47,6 +51,28 @@ export const useConfigStore = defineStore('config', () => {
     const saved = localStorage.getItem('srt-editor-punctuation')
     if (saved !== null) {
       punctuationToRemove.value = saved
+    }
+  }
+
+  // 保存 Whisper 设置
+  const saveWhisperSettings = () => {
+    localStorage.setItem('srt-editor-whisper', JSON.stringify({
+      model: whisperModel.value,
+      language: whisperLanguage.value,
+    }))
+  }
+
+  // 加载 Whisper 设置
+  const loadWhisperSettings = () => {
+    const saved = localStorage.getItem('srt-editor-whisper')
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved)
+        if (parsed.model) whisperModel.value = parsed.model
+        if (parsed.language) whisperLanguage.value = parsed.language
+      } catch (e) {
+        // ignore
+      }
     }
   }
 
@@ -153,6 +179,7 @@ export const useConfigStore = defineStore('config', () => {
   // 初始化时加载配置
   loadConfig()
   loadPunctuation()
+  loadWhisperSettings()
 
   // 检测平台
   const isMac = () => typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.platform)
@@ -187,6 +214,8 @@ export const useConfigStore = defineStore('config', () => {
     keyboardShortcuts,
     recentFiles,
     punctuationToRemove,
+    whisperModel,
+    whisperLanguage,
     updateConfig,
     saveConfig,
     loadConfig,
@@ -194,5 +223,6 @@ export const useConfigStore = defineStore('config', () => {
     clearRecentFiles,
     savePunctuation,
     resetPunctuation,
+    saveWhisperSettings,
   }
 })

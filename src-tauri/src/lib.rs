@@ -4,7 +4,7 @@ mod whisper_transcriber;
 
 use srt_parser::{read_srt_file, write_srt_file, SRTFile, SubtitleEntry};
 use whisper_transcriber::{
-    get_available_models, download_model, transcribe_audio, WhisperModelInfo,
+    get_available_models, download_model, delete_model, transcribe_audio, WhisperModelInfo,
 };
 use waveform_generator::{generate_waveform_with_progress, ProgressCallback};
 use std::fs;
@@ -149,6 +149,44 @@ async fn transcribe_audio_to_subtitles(
     language: String,
 ) -> Result<Vec<SubtitleEntry>, String> {
     transcribe_audio(audio_path, model_size, language, window).await
+}
+
+/// 删除 Whisper 模型
+#[tauri::command]
+fn delete_whisper_model(model_size: String) -> Result<String, String> {
+    delete_model(&model_size)
+}
+
+/// 打开模型目录
+#[tauri::command]
+fn open_whisper_model_dir() -> Result<(), String> {
+    let model_dir = whisper_transcriber::get_model_dir()?;
+    
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(&model_dir)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg(&model_dir)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(&model_dir)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
 }
 
 /// 最近文件信息
@@ -590,6 +628,8 @@ pub fn run() {
             show_log_in_folder,
             get_whisper_models,
             download_whisper_model,
+            delete_whisper_model,
+            open_whisper_model_dir,
             transcribe_audio_to_subtitles
         ])
         .run(tauri::generate_context!())

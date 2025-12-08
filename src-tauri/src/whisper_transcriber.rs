@@ -42,10 +42,19 @@ pub fn get_model_dir() -> Result<PathBuf, String> {
     Ok(model_dir)
 }
 
+/// Get model file name for a specific model size
+fn get_model_filename(model_size: &str) -> String {
+    match model_size {
+        "large" => "ggml-large-v3.bin".to_string(),
+        "turbo" => "ggml-large-v3-turbo.bin".to_string(),
+        _ => format!("ggml-{}.bin", model_size),
+    }
+}
+
 /// Get model file path for a specific model size
 pub fn get_model_path(model_size: &str) -> Result<PathBuf, String> {
     let model_dir = get_model_dir()?;
-    let model_file = model_dir.join(format!("ggml-{}.bin", model_size));
+    let model_file = model_dir.join(get_model_filename(model_size));
     Ok(model_file)
 }
 
@@ -61,6 +70,9 @@ pub fn get_available_models() -> Result<Vec<WhisperModelInfo>, String> {
         ("tiny", "75 MB"),
         ("base", "142 MB"),
         ("small", "466 MB"),
+        ("medium", "1.5 GB"),
+        ("large", "2.9 GB"),
+        ("turbo", "1.5 GB"),
     ];
 
     let mut model_list = Vec::new();
@@ -84,6 +96,20 @@ pub fn get_available_models() -> Result<Vec<WhisperModelInfo>, String> {
     Ok(model_list)
 }
 
+/// Delete a downloaded Whisper model
+pub fn delete_model(model_size: &str) -> Result<String, String> {
+    let model_path = get_model_path(model_size)?;
+    
+    if !model_path.exists() {
+        return Err(format!("Model {} is not downloaded", model_size));
+    }
+    
+    fs::remove_file(&model_path)
+        .map_err(|e| format!("Failed to delete model: {}", e))?;
+    
+    Ok(format!("Successfully deleted {} model", model_size))
+}
+
 /// Download Whisper model from Hugging Face
 pub async fn download_model(model_size: &str, window: Window) -> Result<String, String> {
     let model_path = get_model_path(model_size)?;
@@ -101,9 +127,10 @@ pub async fn download_model(model_size: &str, window: Window) -> Result<String, 
     });
 
     // Download URL from ggerganov/whisper.cpp models
+    let filename = get_model_filename(model_size);
     let download_url = format!(
-        "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-{}.bin",
-        model_size
+        "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/{}",
+        filename
     );
 
     // Download model

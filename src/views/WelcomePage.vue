@@ -36,11 +36,23 @@ const loadingMessage = ref('')
 
 const showTranscriptionDialog = ref(false)
 const availableModels = ref<WhisperModelInfo[]>([])
-const selectedModel = ref('base')
-const selectedLanguage = ref('zh')
 const isTranscribing = ref(false)
 const transcriptionProgress = ref(0)
 const transcriptionMessage = ref('')
+
+// 已下载的模型
+const downloadedModels = computed(() => availableModels.value.filter(m => m.downloaded))
+
+// 当前选中的模型显示名称
+const currentModelName = computed(() => {
+  const model = availableModels.value.find(m => m.name === configStore.whisperModel)
+  if (model?.downloaded) return model.name
+  // 如果默认模型未下载，显示第一个已下载的模型或 base
+  const firstDownloaded = downloadedModels.value[0]
+  return firstDownloaded?.name || 'base'
+})
+
+
 
 let unlistenFileDrop: (() => void) | null = null
 
@@ -151,38 +163,70 @@ const onTitlebarDoubleClick = async () => {
 
 const startTranscription = async () => {
   try {
+    // 先选择音频文件
     const selected = await open({ multiple: false, filters: [{ name: '音频文件', extensions: ['mp3', 'wav', 'ogg', 'flac', 'm4a', 'aac'] }] })
     if (!selected || typeof selected !== 'string') return
 
-    const model = availableModels.value.find(m => m.name === selectedModel.value)
-    if (model && !model.downloaded) {
-      const confirm = await ElMessageBox.confirm(`模型 ${selectedModel.value} (${model.size}) 尚未下载，是否现在下载？`, '需要下载模型', { confirmButtonText: '下载', cancelButtonText: '取消', type: 'info' }).catch(() => false)
+    const modelName = configStore.whisperModel
+    const model = availableModels.value.find(m => m.name === modelName)
+    
+    // 如果模型未下载，自动下载
+    if (!model || !model.downloaded) {
+      const targetModel = model || availableModels.value.find(m => m.name === 'base')!
+      const confirm = await ElMessageBox.confirm(
+        `模型 ${targetModel.name} (${targetModel.size}) 尚未下载，是否现在下载？`,
+        '需要下载模型',
+        { confirmButtonText: '下载', cancelButtonText: '取消', type: 'info' }
+      ).catch(() => false)
       if (!confirm) return
-      isTranscribing.value = true; transcriptionProgress.value = 0; transcriptionMessage.value = '正在下载模型...'; showTranscriptionDialog.value = true
+      
+      isTranscribing.value = true
+      transcriptionProgress.value = 0
+      transcriptionMessage.value = '正在下载模型...'
+      showTranscriptionDialog.value = true
       try {
-        await invoke('download_whisper_model', { modelSize: selectedModel.value })
+        await invoke('download_whisper_model', { modelSize: targetModel.name })
         availableModels.value = await invoke<WhisperModelInfo[]>('get_whisper_models')
+        // 更新默认模型为刚下载的模型
+        configStore.whisperModel = targetModel.name
+        configStore.saveWhisperSettings()
       } catch (error) {
-        isTranscribing.value = false; showTranscriptionDialog.value = false
+        isTranscribing.value = false
+        showTranscriptionDialog.value = false
         await ElMessageBox.alert(`下载模型失败：${error instanceof Error ? error.message : '未知错误'}`, '下载失败', { confirmButtonText: '确定', type: 'error' })
         return
       }
     }
 
-    isTranscribing.value = true; transcriptionProgress.value = 0; transcriptionMessage.value = '正在转录音频...'; showTranscriptionDialog.value = true
-    const entries = await invoke<SubtitleEntry[]>('transcribe_audio_to_subtitles', { audioPath: selected, modelSize: selectedModel.value, language: selectedLanguage.value })
+    isTranscribing.value = true
+    transcriptionProgress.value = 0
+    transcriptionMessage.value = '正在转录音频...'
+    showTranscriptionDialog.value = true
+    
+    const entries = await invoke<SubtitleEntry[]>('transcribe_audio_to_subtitles', {
+      audioPath: selected,
+      modelSize: configStore.whisperModel,
+      language: configStore.whisperLanguage,
+    })
     const fileName = selected.split('/').pop() || 'transcription.srt'
     await subtitleStore.loadSRTFile({ name: fileName.replace(/\.[^.]+$/, '.srt'), path: '', entries, encoding: 'UTF-8' })
-    isTranscribing.value = false; showTranscriptionDialog.value = false
+    isTranscribing.value = false
+    showTranscriptionDialog.value = false
     ElMessage.success(`转录成功！生成了 ${entries.length} 条字幕`)
     setTimeout(() => router.push('/editor'), 500)
   } catch (error) {
-    isTranscribing.value = false; showTranscriptionDialog.value = false
+    isTranscribing.value = false
+    showTranscriptionDialog.value = false
     await ElMessageBox.alert(`转录失败：${error instanceof Error ? error.message : '未知错误'}`, '转录失败', { confirmButtonText: '确定', type: 'error' })
   }
 }
 
 const cancelTranscription = () => { showTranscriptionDialog.value = false; isTranscribing.value = false }
+
+const onSelectModel = (modelName: string) => {
+  configStore.whisperModel = modelName
+  configStore.saveWhisperSettings()
+}
 </script>
 
 <template>
@@ -212,10 +256,30 @@ const cancelTranscription = () => { showTranscriptionDialog.value = false; isTra
               <span v-if="!isLoading">打开字幕文件</span>
               <span v-else>{{ loadingMessage }}</span>
             </button>
-            <button class="secondary-btn" :disabled="isLoading" @click="startTranscription">
-              <i class="i-mdi-microphone"></i>
-              <span>AI 语音转录</span>
-            </button>
+            <div class="transcription-btn-group">
+              <button class="transcription-btn" :disabled="isLoading" @click="startTranscription">
+                <i class="i-mdi-microphone"></i>
+                <span>AI 语音转录</span>
+                <span class="model-badge">{{ currentModelName }}</span>
+              </button>
+              <el-dropdown v-if="downloadedModels.length > 1" trigger="click" @command="onSelectModel">
+                <button class="transcription-dropdown" :disabled="isLoading">
+                  <i class="i-mdi-chevron-down"></i>
+                </button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item
+                      v-for="model in downloadedModels"
+                      :key="model.name"
+                      :command="model.name"
+                      :class="{ 'is-active': model.name === configStore.whisperModel }"
+                    >
+                      {{ model.name }}
+                    </el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
+            </div>
           </div>
         </div>
 
@@ -360,14 +424,14 @@ const cancelTranscription = () => { showTranscriptionDialog.value = false; isTra
 
 /* 主按钮 */
 .primary-btn {
-  flex: 1;
-  padding: 0.875rem 1.25rem;
+  flex: 0 0 auto;
+  padding: 0.625rem 1.25rem;
   background: #409eff;
   color: white;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
   border: none;
-  border-radius: 8px;
+  border-radius: 6px;
   cursor: pointer;
   transition: all 0.15s ease;
 }
@@ -411,6 +475,85 @@ const cancelTranscription = () => { showTranscriptionDialog.value = false; isTra
 
 .secondary-btn i {
   font-size: 18px;
+}
+
+/* 转录按钮组 */
+.transcription-btn-group {
+  flex: 1;
+  display: flex;
+}
+
+.transcription-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  padding: 0.625rem 0.75rem;
+  background: rgba(64, 158, 255, 0.08);
+  color: #666;
+  font-size: 13px;
+  font-weight: 500;
+  border: none;
+  border-radius: 6px 0 0 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.transcription-btn:hover:not(:disabled) {
+  background: rgba(64, 158, 255, 0.15);
+  color: #409eff;
+}
+
+.transcription-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.transcription-btn i {
+  font-size: 16px;
+}
+
+.model-badge {
+  font-size: 10px;
+  padding: 1px 5px;
+  background: rgba(64, 158, 255, 0.15);
+  color: #409eff;
+  border-radius: 3px;
+}
+
+.transcription-dropdown {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  background: rgba(64, 158, 255, 0.08);
+  color: #666;
+  border: none;
+  border-left: 1px solid rgba(64, 158, 255, 0.15);
+  border-radius: 0 6px 6px 0;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.transcription-dropdown:hover:not(:disabled) {
+  background: rgba(64, 158, 255, 0.15);
+  color: #409eff;
+}
+
+.transcription-dropdown:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.transcription-dropdown i {
+  font-size: 14px;
+}
+
+/* 只有一个模型时，按钮圆角完整 */
+.transcription-btn-group .transcription-btn:only-child {
+  border-radius: 6px;
 }
 
 /* 最近文件 */

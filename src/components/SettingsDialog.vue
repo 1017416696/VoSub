@@ -2,7 +2,7 @@
 import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useConfigStore, DEFAULT_PUNCTUATION } from '@/stores/config'
-import { Setting, Key, InfoFilled, ChatDotRound, Message, Document } from '@element-plus/icons-vue'
+import { Setting, Key, InfoFilled, ChatDotRound, Message, Document, Microphone, FolderOpened } from '@element-plus/icons-vue'
 import { open } from '@tauri-apps/plugin-shell'
 import { invoke } from '@tauri-apps/api/core'
 import {
@@ -22,16 +22,85 @@ const emit = defineEmits<{
 const configStore = useConfigStore()
 
 // 当前选中的菜单项
-const activeMenu = ref<'general' | 'shortcuts' | 'logs' | 'contact' | 'about'>('general')
+const activeMenu = ref<'general' | 'whisper' | 'shortcuts' | 'logs' | 'contact' | 'about'>('general')
 
 // 菜单项配置
 const menuItems = [
   { key: 'general', label: '常规设置', icon: Setting },
+  { key: 'whisper', label: '语音模型', icon: Microphone },
   { key: 'shortcuts', label: '快捷键列表', icon: Key },
   { key: 'logs', label: '日志', icon: Document },
   { key: 'contact', label: '联系开发者', icon: ChatDotRound },
   { key: 'about', label: '关于', icon: InfoFilled },
 ] as const
+
+// Whisper 模型相关
+interface WhisperModelInfo {
+  name: string
+  size: string
+  downloaded: boolean
+  path?: string
+}
+
+const whisperModels = ref<WhisperModelInfo[]>([])
+const downloadingModel = ref<string | null>(null)
+const downloadProgress = ref(0)
+const downloadMessage = ref('')
+
+const fetchWhisperModels = async () => {
+  try {
+    whisperModels.value = await invoke<WhisperModelInfo[]>('get_whisper_models')
+  } catch (e) {
+    console.error('Failed to fetch whisper models:', e)
+  }
+}
+
+const downloadWhisperModel = async (modelName: string) => {
+  downloadingModel.value = modelName
+  downloadProgress.value = 0
+  downloadMessage.value = '准备下载...'
+  
+  try {
+    await invoke('download_whisper_model', { modelSize: modelName })
+    await fetchWhisperModels()
+    ElMessage.success(`模型 ${modelName} 下载完成`)
+  } catch (error) {
+    ElMessage.error(`下载失败：${error instanceof Error ? error.message : '未知错误'}`)
+  } finally {
+    downloadingModel.value = null
+  }
+}
+
+const deleteWhisperModel = async (modelName: string) => {
+  try {
+    await ElMessageBox.confirm(`确定要删除模型 ${modelName} 吗？`, '删除模型', { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' })
+    await invoke('delete_whisper_model', { modelSize: modelName })
+    await fetchWhisperModels()
+    ElMessage.success(`模型 ${modelName} 已删除`)
+  } catch (e) {
+    if (e !== 'cancel') {
+      ElMessage.error(`删除失败：${e instanceof Error ? e.message : '未知错误'}`)
+    }
+  }
+}
+
+const openModelDir = async () => {
+  try {
+    await invoke('open_whisper_model_dir')
+  } catch (e) {
+    ElMessage.error('无法打开模型目录')
+  }
+}
+
+const setDefaultModel = (modelName: string) => {
+  configStore.whisperModel = modelName
+  configStore.saveWhisperSettings()
+  ElMessage.success(`已将 ${modelName} 设为默认模型`)
+}
+
+// 监听下载进度
+import { listen } from '@tauri-apps/api/event'
+let unlistenProgress: (() => void) | null = null
 
 // 日志文件路径
 const logPath = ref('')
@@ -66,6 +135,16 @@ const copyLogPath = async () => {
 
 // 初始化时获取日志路径
 fetchLogPath()
+
+// 初始化时获取 Whisper 模型列表并监听下载进度
+const setupWhisperListener = async () => {
+  await fetchWhisperModels()
+  unlistenProgress = await listen<{ progress: number; current_text: string }>('transcription-progress', (event) => {
+    downloadProgress.value = event.payload.progress
+    downloadMessage.value = event.payload.current_text
+  })
+}
+setupWhisperListener()
 
 // 联系方式
 const contactInfo = {
@@ -118,6 +197,7 @@ watch(() => props.visible, (visible) => {
 // 组件卸载时清理
 onBeforeUnmount(() => {
   document.removeEventListener('keydown', handleKeydown, true)
+  if (unlistenProgress) unlistenProgress()
 })
 
 // 检测平台
@@ -304,6 +384,62 @@ const shortcutCategories = computed(() => {
                     </div>
                   </div>
                 </div>
+              </div>
+            </div>
+
+            <!-- 语音模型 -->
+            <div v-if="activeMenu === 'whisper'" class="content-section">
+              <div class="section-header">
+                <h2 class="section-title">语音模型</h2>
+                <el-button @click="openModelDir">打开模型目录</el-button>
+              </div>
+              
+              <div class="whisper-intro">
+                <p>Whisper 是 OpenAI 开发的语音识别模型，用于将音频转录为字幕。模型越大，识别精度越高，但速度越慢且占用更多存储空间。</p>
+              </div>
+              
+              <div class="whisper-models-list">
+                <div
+                  v-for="model in whisperModels"
+                  :key="model.name"
+                  class="whisper-model-item"
+                  :class="{ 'is-default': model.downloaded && configStore.whisperModel === model.name, 'is-downloaded': model.downloaded }"
+                  @click="model.downloaded && setDefaultModel(model.name)"
+                >
+                  <div class="model-radio">
+                    <span v-if="model.downloaded" class="radio-dot" :class="{ active: configStore.whisperModel === model.name }"></span>
+                    <span v-else class="radio-placeholder"></span>
+                  </div>
+                  <div class="model-info">
+                    <span class="model-name">{{ model.name }}</span>
+                    <span class="model-size">{{ model.size }}</span>
+                  </div>
+                  <div class="model-actions" @click.stop>
+                    <template v-if="downloadingModel === model.name">
+                      <div class="download-progress">
+                        <el-progress :percentage="Math.round(downloadProgress)" :stroke-width="6" :show-text="false" style="width: 100px" />
+                        <span class="progress-text">{{ Math.round(downloadProgress) }}%</span>
+                      </div>
+                    </template>
+                    <template v-else>
+                      <el-button v-if="!model.downloaded" size="small" type="primary" :disabled="!!downloadingModel" @click="downloadWhisperModel(model.name)">下载</el-button>
+                      <el-button v-else size="small" type="danger" plain :disabled="!!downloadingModel || configStore.whisperModel === model.name" @click="deleteWhisperModel(model.name)">删除</el-button>
+                    </template>
+                  </div>
+                </div>
+              </div>
+              
+              <div class="whisper-tips">
+                <h4>模型说明</h4>
+                <ul>
+                  <li><strong>tiny</strong> - 最小最快，适合快速预览</li>
+                  <li><strong>base</strong> - 平衡选择，推荐日常使用</li>
+                  <li><strong>small</strong> - 较高精度，适合一般转录</li>
+                  <li><strong>medium</strong> - 高精度，适合专业场景</li>
+                  <li><strong>large</strong> - 最高精度，适合高要求场景</li>
+                  <li><strong>turbo</strong> - 优化版本，速度与精度平衡</li>
+                </ul>
+                <p class="whisper-hint">提示：你也可以手动将模型文件放入模型目录</p>
               </div>
             </div>
 
@@ -514,7 +650,8 @@ const shortcutCategories = computed(() => {
   display: flex;
   flex-direction: column;
   flex: 1;
-  overflow: hidden;
+  overflow-y: auto;
+  padding-right: 8px;
 }
 
 .close-btn {
@@ -544,6 +681,13 @@ const shortcutCategories = computed(() => {
   font-size: 20px;
   font-weight: 600;
   color: #333;
+  margin: 0;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   margin-bottom: 24px;
 }
 
@@ -917,6 +1061,145 @@ const shortcutCategories = computed(() => {
   margin-top: 12px;
   font-size: 13px;
   color: #666;
+}
+
+/* 语音模型页面 */
+.whisper-intro {
+  margin-bottom: 20px;
+}
+
+.whisper-intro p {
+  font-size: 13px;
+  color: #666;
+  line-height: 1.6;
+  margin: 0;
+}
+
+.whisper-models-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 24px;
+}
+
+.whisper-model-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: #f9f9f9;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  transition: all 0.15s;
+}
+
+.whisper-model-item.is-downloaded {
+  cursor: pointer;
+}
+
+.whisper-model-item.is-downloaded:hover {
+  background: #f0f0f0;
+}
+
+.model-radio {
+  width: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.radio-dot {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid #ddd;
+  transition: all 0.2s;
+}
+
+.radio-dot.active {
+  border-color: #409eff;
+  background: #409eff;
+  box-shadow: inset 0 0 0 3px #fff;
+}
+
+.radio-placeholder {
+  width: 16px;
+  height: 16px;
+}
+
+.model-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+}
+
+.model-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: #333;
+  min-width: 60px;
+}
+
+.model-size {
+  font-size: 13px;
+  color: #888;
+}
+
+.whisper-model-item.is-default {
+  background: #f5f9ff;
+  border-color: #d9ecff;
+}
+
+.model-actions {
+  display: flex;
+  align-items: center;
+}
+
+.download-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.progress-text {
+  font-size: 12px;
+  color: #666;
+  min-width: 36px;
+}
+
+.whisper-tips {
+  background: #fafafa;
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.whisper-tips h4 {
+  font-size: 14px;
+  font-weight: 600;
+  color: #333;
+  margin: 0 0 12px;
+}
+
+.whisper-tips ul {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.whisper-tips li {
+  font-size: 13px;
+  color: #666;
+  line-height: 1.8;
+}
+
+.whisper-tips li strong {
+  color: #333;
+}
+
+.whisper-tips .whisper-hint {
+  margin-top: 12px;
+  font-size: 12px;
+  color: #999;
 }
 
 /* 过渡动画 */
