@@ -7,7 +7,6 @@ import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { listen } from '@tauri-apps/api/event'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Document, Headset, Clock, Microphone } from '@element-plus/icons-vue'
 import { useSubtitleStore } from '@/stores/subtitle'
 import { useAudioStore } from '@/stores/audio'
 import { useConfigStore } from '@/stores/config'
@@ -31,34 +30,10 @@ const subtitleStore = useSubtitleStore()
 const audioStore = useAudioStore()
 const configStore = useConfigStore()
 
-// 检测操作系统
-const isMac = computed(() => {
-  return typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.platform)
-})
-
-// 将快捷键拆分为单独的按键数组
-const splitShortcut = (shortcut: string): string[] => {
-  let formatted = shortcut
-  if (isMac.value) {
-    formatted = formatted
-      .replace('Ctrl', '⌘')
-      .replace('Shift', '⇧')
-      .replace('Alt', '⌥')
-  }
-  return formatted.split('+').map(k => k.trim()).filter(k => k)
-}
-
 const isDragging = ref(false)
 const isLoading = ref(false)
 const loadingMessage = ref('')
 
-// 拖放的文件预览
-const droppedFiles = ref<{ srt: string | null; audio: string | null }>({
-  srt: null,
-  audio: null,
-})
-
-// 转录相关状态
 const showTranscriptionDialog = ref(false)
 const availableModels = ref<WhisperModelInfo[]>([])
 const selectedModel = ref('base')
@@ -67,572 +42,211 @@ const isTranscribing = ref(false)
 const transcriptionProgress = ref(0)
 const transcriptionMessage = ref('')
 
-// 监听 Tauri 的文件拖放事件
 let unlistenFileDrop: (() => void) | null = null
 
 onMounted(async () => {
   const appWindow = getCurrentWebviewWindow()
-
   const unlistenHover = await appWindow.onDragDropEvent((event) => {
-    if (event.payload.type === 'over') {
-      isDragging.value = true
-    } else if (event.payload.type === 'leave') {
-      isDragging.value = false
-    } else if (event.payload.type === 'drop') {
-      isDragging.value = false
-      const paths = event.payload.paths
-      handleFileDrop(paths)
-    }
+    if (event.payload.type === 'over') isDragging.value = true
+    else if (event.payload.type === 'leave') isDragging.value = false
+    else if (event.payload.type === 'drop') { isDragging.value = false; handleFileDrop(event.payload.paths) }
   })
-
   unlistenFileDrop = unlistenHover
 
-  // 监听转录进度
   const unlistenProgress = await listen<TranscriptionProgress>('transcription-progress', (event) => {
     transcriptionProgress.value = event.payload.progress
     transcriptionMessage.value = event.payload.current_text
   })
+  onUnmounted(() => unlistenProgress())
 
-  // 在组件卸载时取消监听
-  onUnmounted(() => {
-    unlistenProgress()
-  })
-
-  // 加载可用模型列表
-  try {
-    availableModels.value = await invoke<WhisperModelInfo[]>('get_whisper_models')
-  } catch (error) {
-    console.error('Failed to load models:', error)
-  }
+  try { availableModels.value = await invoke<WhisperModelInfo[]>('get_whisper_models') } catch (e) { console.error(e) }
 })
 
-onUnmounted(() => {
-  if (unlistenFileDrop) {
-    unlistenFileDrop()
-  }
-})
+onUnmounted(() => { if (unlistenFileDrop) unlistenFileDrop() })
 
-// 处理拖放的文件
 const handleFileDrop = async (paths: string[]) => {
-  if (!paths || paths.length === 0) {
-    return
-  }
-
+  if (!paths || paths.length === 0) return
   const srtFile = paths.find((p) => p.toLowerCase().endsWith('.srt'))
   const audioFile = paths.find((p) => /\.(mp3|wav|ogg|flac|m4a|aac)$/i.test(p.toLowerCase()))
-
   if (!srtFile && !audioFile) {
-    await ElMessageBox.alert('请拖放有效的 SRT 字幕文件或音频文件', '无效文件', {
-      confirmButtonText: '确定',
-      type: 'warning',
-    })
+    await ElMessageBox.alert('请拖放有效的 SRT 字幕文件或音频文件', '无效文件', { confirmButtonText: '确定', type: 'warning' })
     return
   }
-
   await processFiles({ srtPath: srtFile, audioPath: audioFile })
 }
 
-// 打开文件选择对话框
 const openSRTFile = async () => {
   try {
-    const selected = await open({
-      multiple: false,
-      filters: [
-        {
-          name: 'SRT 字幕文件',
-          extensions: ['srt'],
-        },
-      ],
-    })
-
-    if (selected) {
-      await processFiles({ srtPath: selected as string })
-    }
-  } catch (error) {
-    await ElMessageBox.alert('无法打开文件选择器', '错误', {
-      confirmButtonText: '确定',
-      type: 'error',
-    })
-  }
+    const selected = await open({ multiple: false, filters: [{ name: 'SRT 字幕文件', extensions: ['srt'] }] })
+    if (selected) await processFiles({ srtPath: selected as string })
+  } catch (e) { await ElMessageBox.alert('无法打开文件选择器', '错误', { confirmButtonText: '确定', type: 'error' }) }
 }
 
-const openAudioFile = async () => {
-  try {
-    const selected = await open({
-      multiple: false,
-      filters: [
-        {
-          name: '音频文件',
-          extensions: ['mp3', 'wav', 'ogg', 'flac', 'm4a', 'aac'],
-        },
-      ],
-    })
-
-    if (selected && typeof selected === 'string') {
-      await processFiles({ audioPath: selected })
-    }
-  } catch (error) {
-    await ElMessageBox.alert('无法打开文件选择器', '错误', {
-      confirmButtonText: '确定',
-      type: 'error',
-    })
-  }
-}
-
-// 处理文件加载
-const processFiles = async ({
-  srtPath,
-  audioPath,
-}: {
-  srtPath?: string
-  audioPath?: string
-}) => {
+const processFiles = async ({ srtPath, audioPath }: { srtPath?: string; audioPath?: string }) => {
   isLoading.value = true
   let srtLoaded = false
-  let audioLoaded = false
-
   try {
     if (srtPath) {
       loadingMessage.value = '正在加载字幕文件...'
-      try {
-        const srtFile = await invoke<SRTFile>('read_srt', { filePath: srtPath })
-        await subtitleStore.loadSRTFile(srtFile)
-        droppedFiles.value.srt = srtPath.split('/').pop() || srtPath
-        srtLoaded = true
-        
-        // 添加到最近文件列表
-        configStore.addRecentFile(srtPath)
-        
-        // 更新菜单
-        if ((window as any).__updateRecentFilesMenu) {
-          await (window as any).__updateRecentFilesMenu()
-        }
-      } catch (error) {
-        await ElMessageBox.alert(
-          `加载 SRT 文件失败：${error instanceof Error ? error.message : '未知错误'}`,
-          '加载失败',
-          {
-            confirmButtonText: '确定',
-            type: 'error',
-          }
-        )
-      }
+      const srtFile = await invoke<SRTFile>('read_srt', { filePath: srtPath })
+      await subtitleStore.loadSRTFile(srtFile)
+      srtLoaded = true
+      configStore.addRecentFile(srtPath)
+      if ((window as any).__updateRecentFilesMenu) await (window as any).__updateRecentFilesMenu()
     }
-
     if (audioPath) {
       loadingMessage.value = '正在加载音频文件...'
-      try {
-        const fileName = audioPath.split('/').pop() || 'audio'
-        const fileExtension = audioPath.split('.').pop()?.toLowerCase() || 'mp3'
-
-        const audioFile: AudioFile = {
-          name: fileName,
-          path: audioPath,
-          duration: 0,
-          format: fileExtension,
-        }
-        await audioStore.loadAudio(audioFile)
-        droppedFiles.value.audio = fileName
-        audioLoaded = true
-      } catch (error) {
-        await ElMessageBox.alert(
-          `加载音频文件失败：${error instanceof Error ? error.message : '未知错误'}`,
-          '加载失败',
-          {
-            confirmButtonText: '确定',
-            type: 'error',
-          }
-        )
-      }
+      const fileName = audioPath.split('/').pop() || 'audio'
+      const fileExtension = audioPath.split('.').pop()?.toLowerCase() || 'mp3'
+      await audioStore.loadAudio({ name: fileName, path: audioPath, duration: 0, format: fileExtension })
     }
-
-    if (srtLoaded) {
-      loadingMessage.value = '即将进入编辑器...'
-      setTimeout(() => {
-        router.push('/editor')
-      }, 500)
-    }
-  } finally {
-    if (!srtLoaded) {
-      isLoading.value = false
-      loadingMessage.value = ''
-    }
-  }
+    if (srtLoaded) { loadingMessage.value = '即将进入编辑器...'; setTimeout(() => router.push('/editor'), 500) }
+  } catch (error) {
+    await ElMessageBox.alert(`加载失败：${error instanceof Error ? error.message : '未知错误'}`, '错误', { confirmButtonText: '确定', type: 'error' })
+  } finally { if (!srtLoaded) { isLoading.value = false; loadingMessage.value = '' } }
 }
 
-// 格式化相对时间
 const formatRelativeTime = (timestamp: number): string => {
-  const now = Date.now()
-  const diff = now - timestamp
-  const minutes = Math.floor(diff / 60000)
-  const hours = Math.floor(diff / 3600000)
-  const days = Math.floor(diff / 86400000)
-
+  const diff = Date.now() - timestamp
+  const minutes = Math.floor(diff / 60000), hours = Math.floor(diff / 3600000), days = Math.floor(diff / 86400000)
   if (minutes < 1) return '刚刚'
   if (minutes < 60) return `${minutes} 分钟前`
   if (hours < 24) return `${hours} 小时前`
   if (days < 7) return `${days} 天前`
-  
   const date = new Date(timestamp)
   return `${date.getMonth() + 1}/${date.getDate()}`
 }
 
-// 打开最近文件
 const openRecentFile = async (filePath: string) => {
   isLoading.value = true
   loadingMessage.value = '正在加载字幕文件...'
-  
   try {
     const srtFile = await invoke<SRTFile>('read_srt', { filePath })
     await subtitleStore.loadSRTFile(srtFile)
-    
-    // 更新最近文件列表（移到最前）
     configStore.addRecentFile(filePath)
-    
-    // 更新菜单
-    if ((window as any).__updateRecentFilesMenu) {
-      await (window as any).__updateRecentFilesMenu()
-    }
-    
-    loadingMessage.value = '即将进入编辑器...'
-    setTimeout(() => {
-      router.push('/editor')
-    }, 300)
+    if ((window as any).__updateRecentFilesMenu) await (window as any).__updateRecentFilesMenu()
+    setTimeout(() => router.push('/editor'), 300)
   } catch (error) {
-    isLoading.value = false
-    loadingMessage.value = ''
-    await ElMessageBox.alert(
-      `加载文件失败：${error instanceof Error ? error.message : '文件可能已被移动或删除'}`,
-      '加载失败',
-      {
-        confirmButtonText: '确定',
-        type: 'error',
-      }
-    )
+    isLoading.value = false; loadingMessage.value = ''
+    await ElMessageBox.alert(`加载文件失败：${error instanceof Error ? error.message : '文件可能已被移动或删除'}`, '加载失败', { confirmButtonText: '确定', type: 'error' })
   }
 }
 
-// 记录点击时间用于检测双击
 let lastClickTime = 0
-
-// 标题栏鼠标按下事件 - 开始拖拽窗口
 const onTitlebarMousedown = async (e: MouseEvent) => {
   if (e.button === 0) {
     const now = Date.now()
-    const timeDiff = now - lastClickTime
+    if (now - lastClickTime < 300) { await onTitlebarDoubleClick(); return }
     lastClickTime = now
-
-    // 检测双击（300ms 内的两次点击）
-    if (timeDiff < 300) {
-      await onTitlebarDoubleClick()
-      return
-    }
-
     e.preventDefault()
-    try {
-      await getCurrentWindow().startDragging()
-    } catch (err) {
-      // 拖拽失败，静默处理
-    }
+    try { await getCurrentWindow().startDragging() } catch {}
   }
 }
 
-// 双击标题栏切换最大化/还原
 const onTitlebarDoubleClick = async () => {
   const window = getCurrentWindow()
-  const isMaximized = await window.isMaximized()
-  if (isMaximized) {
-    await window.unmaximize()
-  } else {
-    await window.maximize()
-  }
+  if (await window.isMaximized()) await window.unmaximize()
+  else await window.maximize()
 }
 
-// 打开音频转录对话框
-const openTranscriptionDialog = async () => {
-  try {
-    const selected = await open({
-      multiple: false,
-      filters: [
-        {
-          name: '音频文件',
-          extensions: ['mp3', 'wav', 'ogg', 'flac', 'm4a', 'aac'],
-        },
-      ],
-    })
-
-    if (selected && typeof selected === 'string') {
-      showTranscriptionDialog.value = true
-    }
-  } catch (error) {
-    await ElMessageBox.alert('无法打开文件选择器', '错误', {
-      confirmButtonText: '确定',
-      type: 'error',
-    })
-  }
-}
-
-// 开始转录
 const startTranscription = async () => {
   try {
-    // 选择音频文件
-    const selected = await open({
-      multiple: false,
-      filters: [
-        {
-          name: '音频文件',
-          extensions: ['mp3', 'wav', 'ogg', 'flac', 'm4a', 'aac'],
-        },
-      ],
-    })
+    const selected = await open({ multiple: false, filters: [{ name: '音频文件', extensions: ['mp3', 'wav', 'ogg', 'flac', 'm4a', 'aac'] }] })
+    if (!selected || typeof selected !== 'string') return
 
-    if (!selected || typeof selected !== 'string') {
-      return
-    }
-
-    // 检查模型是否已下载
     const model = availableModels.value.find(m => m.name === selectedModel.value)
     if (model && !model.downloaded) {
-      const confirm = await ElMessageBox.confirm(
-        `模型 ${selectedModel.value} (${model.size}) 尚未下载，是否现在下载？`,
-        '需要下载模型',
-        {
-          confirmButtonText: '下载',
-          cancelButtonText: '取消',
-          type: 'info',
-        }
-      ).catch(() => false)
-
-      if (!confirm) {
-        return
-      }
-
-      // 下载模型
-      isTranscribing.value = true
-      transcriptionProgress.value = 0
-      transcriptionMessage.value = '正在下载模型...'
-      showTranscriptionDialog.value = true
-
+      const confirm = await ElMessageBox.confirm(`模型 ${selectedModel.value} (${model.size}) 尚未下载，是否现在下载？`, '需要下载模型', { confirmButtonText: '下载', cancelButtonText: '取消', type: 'info' }).catch(() => false)
+      if (!confirm) return
+      isTranscribing.value = true; transcriptionProgress.value = 0; transcriptionMessage.value = '正在下载模型...'; showTranscriptionDialog.value = true
       try {
-        await invoke('download_whisper_model', {
-          modelSize: selectedModel.value,
-        })
-
-        // 更新模型列表
+        await invoke('download_whisper_model', { modelSize: selectedModel.value })
         availableModels.value = await invoke<WhisperModelInfo[]>('get_whisper_models')
       } catch (error) {
-        isTranscribing.value = false
-        showTranscriptionDialog.value = false
-        await ElMessageBox.alert(
-          `下载模型失败：${error instanceof Error ? error.message : '未知错误'}`,
-          '下载失败',
-          {
-            confirmButtonText: '确定',
-            type: 'error',
-          }
-        )
+        isTranscribing.value = false; showTranscriptionDialog.value = false
+        await ElMessageBox.alert(`下载模型失败：${error instanceof Error ? error.message : '未知错误'}`, '下载失败', { confirmButtonText: '确定', type: 'error' })
         return
       }
     }
 
-    // 开始转录
-    isTranscribing.value = true
-    transcriptionProgress.value = 0
-    transcriptionMessage.value = '正在转录音频...'
-    showTranscriptionDialog.value = true
-
-    const entries = await invoke<SubtitleEntry[]>('transcribe_audio_to_subtitles', {
-      audioPath: selected,
-      modelSize: selectedModel.value,
-      language: selectedLanguage.value,
-    })
-
-    // 转录成功，加载字幕
+    isTranscribing.value = true; transcriptionProgress.value = 0; transcriptionMessage.value = '正在转录音频...'; showTranscriptionDialog.value = true
+    const entries = await invoke<SubtitleEntry[]>('transcribe_audio_to_subtitles', { audioPath: selected, modelSize: selectedModel.value, language: selectedLanguage.value })
     const fileName = selected.split('/').pop() || 'transcription.srt'
-    const srtFile: SRTFile = {
-      name: fileName.replace(/\.[^.]+$/, '.srt'),
-      path: '',
-      entries,
-      encoding: 'UTF-8',
-    }
-
-    await subtitleStore.loadSRTFile(srtFile)
-
-    // 跳转到编辑器
-    isTranscribing.value = false
-    showTranscriptionDialog.value = false
-
+    await subtitleStore.loadSRTFile({ name: fileName.replace(/\.[^.]+$/, '.srt'), path: '', entries, encoding: 'UTF-8' })
+    isTranscribing.value = false; showTranscriptionDialog.value = false
     ElMessage.success(`转录成功！生成了 ${entries.length} 条字幕`)
-
-    setTimeout(() => {
-      router.push('/editor')
-    }, 500)
+    setTimeout(() => router.push('/editor'), 500)
   } catch (error) {
-    isTranscribing.value = false
-    showTranscriptionDialog.value = false
-    await ElMessageBox.alert(
-      `转录失败：${error instanceof Error ? error.message : '未知错误'}`,
-      '转录失败',
-      {
-        confirmButtonText: '确定',
-        type: 'error',
-      }
-    )
+    isTranscribing.value = false; showTranscriptionDialog.value = false
+    await ElMessageBox.alert(`转录失败：${error instanceof Error ? error.message : '未知错误'}`, '转录失败', { confirmButtonText: '确定', type: 'error' })
   }
 }
 
-// 取消转录
-const cancelTranscription = () => {
-  showTranscriptionDialog.value = false
-  isTranscribing.value = false
-}
-
-
+const cancelTranscription = () => { showTranscriptionDialog.value = false; isTranscribing.value = false }
 </script>
 
 <template>
-  <div class="welcome-page">
-    <!-- 标题栏区域（可拖拽） -->
+  <div class="welcome-page" :class="{ 'is-dragging': isDragging }">
     <div class="titlebar" @mousedown.left="onTitlebarMousedown" @dblclick="onTitlebarDoubleClick">
       <span class="titlebar-title">SRT 字幕编辑器</span>
     </div>
 
     <div class="welcome-content">
-      <!-- 主区域 -->
       <div class="main-section">
         <!-- 品牌区域 -->
         <div class="brand-area">
           <div class="brand-icon">
             <i class="i-mdi-subtitles-outline"></i>
           </div>
-          <p class="brand-desc">专业的字幕编辑工具，支持音频同步和批量操作</p>
-        </div>
-
-        <!-- 拖放区域 -->
-        <div
-          class="drop-zone"
-          :class="{ 'is-dragging': isDragging, 'is-loading': isLoading }"
-        >
-          <div v-if="!isLoading" class="drop-zone-content">
-            <div class="drop-icon">
-              <i class="i-mdi-file-upload-outline"></i>
-            </div>
-            <p class="drop-title">拖放文件到此处</p>
-            <p class="drop-hint">
-              支持 <span class="file-type srt">.srt</span> 字幕文件和
-              <span class="file-type audio">音频文件</span>
-            </p>
-          </div>
-
-          <div v-else class="loading-content">
-            <div class="loading-spinner"></div>
-            <p class="loading-text">{{ loadingMessage }}</p>
+          <div class="brand-text">
+            <h1 class="brand-title">SRT 字幕编辑器</h1>
+            <p class="brand-desc">专业的字幕编辑工具，支持音频同步和批量操作</p>
           </div>
         </div>
 
-        <!-- 操作按钮 -->
-        <div class="action-buttons">
-          <button
-            class="action-btn primary"
-            :disabled="isLoading"
-            @click="openSRTFile"
-          >
-            <el-icon><Document /></el-icon>
-            <span>选择 SRT 文件</span>
-          </button>
-          <button
-            class="action-btn secondary"
-            :disabled="isLoading"
-            @click="openAudioFile"
-          >
-            <el-icon><Headset /></el-icon>
-            <span>选择音频文件</span>
-          </button>
-        </div>
-
-        <!-- 音频转录按钮 -->
-        <div class="transcription-section">
-          <button
-            class="action-btn transcription"
-            :disabled="isLoading"
-            @click="startTranscription"
-          >
-            <el-icon><Microphone /></el-icon>
-            <span>音频转录成字幕</span>
-          </button>
-          <p class="transcription-hint">使用 AI 模型将音频自动转录为字幕文件</p>
-        </div>
-
-        <!-- 提示信息 -->
-        <p class="tip-text">
-          提示：可单独加载 SRT 文件编辑，或同时加载音频以同步调整时间轴
-        </p>
-
-        <!-- 最近打开的文件 -->
-        <div v-if="configStore.recentFiles.length > 0" class="recent-files">
-          <div class="recent-header">
-            <el-icon><Clock /></el-icon>
-            <span>最近打开</span>
+        <!-- 开始使用 -->
+        <div class="get-started">
+          <p class="section-title">开始使用</p>
+          <div class="action-buttons">
+            <button class="primary-btn" :disabled="isLoading" @click="openSRTFile">
+              <span v-if="!isLoading">打开字幕文件</span>
+              <span v-else>{{ loadingMessage }}</span>
+            </button>
+            <button class="secondary-btn" :disabled="isLoading" @click="startTranscription">
+              <i class="i-mdi-microphone"></i>
+              <span>AI 语音转录</span>
+            </button>
           </div>
+        </div>
+
+        <!-- 最近文件 -->
+        <div v-if="configStore.recentFiles.length > 0" class="recent-section">
+          <p class="section-title">最近打开</p>
           <div class="recent-list">
-            <div
-              v-for="file in configStore.recentFiles.slice(0, 5)"
-              :key="file.path"
-              class="recent-item"
-              :title="file.path"
-              @click="openRecentFile(file.path)"
-            >
-              <el-icon class="file-icon"><Document /></el-icon>
-              <span class="file-name">{{ file.name }}</span>
-              <span class="file-time">{{ formatRelativeTime(file.lastOpened) }}</span>
+            <div v-for="file in configStore.recentFiles.slice(0, 5)" :key="file.path" class="recent-item" @click="openRecentFile(file.path)">
+              <i class="i-mdi-file-document-outline file-icon"></i>
+              <span class="recent-name">{{ file.name }}</span>
+              <span class="recent-time">{{ formatRelativeTime(file.lastOpened) }}</span>
             </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- 底部快捷键提示 -->
-      <div class="shortcuts-bar">
-        <div class="shortcut-item">
-          <span class="shortcut-label">打开文件</span>
-          <div class="shortcut-keys">
-            <kbd v-for="(k, i) in splitShortcut('Ctrl+O')" :key="i" class="key-cap">{{ k }}</kbd>
-          </div>
-        </div>
-        <div class="shortcut-item">
-          <span class="shortcut-label">保存</span>
-          <div class="shortcut-keys">
-            <kbd v-for="(k, i) in splitShortcut('Ctrl+S')" :key="i" class="key-cap">{{ k }}</kbd>
-          </div>
-        </div>
-        <div class="shortcut-item">
-          <span class="shortcut-label">播放/暂停</span>
-          <div class="shortcut-keys">
-            <kbd class="key-cap">Space</kbd>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- 转录进度对话框 -->
-    <el-dialog
-      v-model="showTranscriptionDialog"
-      title="音频转录"
-      :close-on-click-modal="false"
-      :close-on-press-escape="false"
-      :show-close="!isTranscribing"
-      width="500px"
-    >
-      <div class="transcription-dialog">
-        <div v-if="isTranscribing" class="progress-content">
-          <el-progress
-            :percentage="Math.round(transcriptionProgress)"
-            :stroke-width="12"
-            :status="transcriptionProgress >= 100 ? 'success' : undefined"
-          />
-          <p class="progress-message">{{ transcriptionMessage }}</p>
-        </div>
+    <!-- 拖放提示遮罩 -->
+    <div v-if="isDragging" class="drag-overlay">
+      <div class="drag-hint">
+        <i class="i-mdi-file-upload-outline"></i>
+        <p>释放以打开文件</p>
       </div>
+    </div>
 
+    <!-- 转录进度对话框 -->
+    <el-dialog v-model="showTranscriptionDialog" title="音频转录" :close-on-click-modal="false" :close-on-press-escape="false" :show-close="!isTranscribing" width="400px">
+      <div v-if="isTranscribing" class="progress-content">
+        <el-progress :percentage="Math.round(transcriptionProgress)" :stroke-width="10" />
+        <p class="progress-message">{{ transcriptionMessage }}</p>
+      </div>
       <template #footer>
         <el-button v-if="!isTranscribing" @click="cancelTranscription">取消</el-button>
       </template>
@@ -646,415 +260,255 @@ const cancelTranscription = () => {
   height: 100vh;
   display: flex;
   flex-direction: column;
-  background: #f5f5f5;
+  background: #e8e8e8;
   overflow: hidden;
+  position: relative;
+}
+
+.welcome-page.is-dragging {
+  background: #ddd;
 }
 
 /* 标题栏 */
 .titlebar {
   height: 38px;
-  background: #ffffff;
-  border-bottom: 1px solid #e5e7eb;
+  background: transparent;
   display: flex;
   align-items: center;
   justify-content: center;
-  position: relative;
   flex-shrink: 0;
   -webkit-app-region: drag;
-  -webkit-user-select: none;
   user-select: none;
-  cursor: default;
 }
 
 .titlebar-title {
   font-size: 13px;
   font-weight: 500;
-  color: #333;
-  pointer-events: none;
+  color: #666;
 }
-
-
 
 /* 主内容区 */
 .welcome-content {
   flex: 1;
   display: flex;
-  flex-direction: column;
   justify-content: center;
   align-items: center;
   padding: 2rem;
-  gap: 1.5rem;
 }
 
 .main-section {
   display: flex;
   flex-direction: column;
-  align-items: center;
   gap: 1.5rem;
-  max-width: 480px;
-  width: 100%;
+  width: 340px;
 }
 
 /* 品牌区域 */
 .brand-area {
-  text-align: center;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 0.5rem;
 }
 
 .brand-icon {
-  width: 64px;
-  height: 64px;
-  margin: 0 auto 0.75rem;
-  background: linear-gradient(135deg, #3b82f6 0%, #6366f1 100%);
-  border-radius: 16px;
+  width: 48px;
+  height: 48px;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
 }
 
 .brand-icon i {
-  font-size: 32px;
-  color: white;
+  font-size: 42px;
+  color: #333;
 }
 
-.brand-desc {
-  font-size: 14px;
-  color: #6b7280;
-  margin: 0;
-  user-select: none;
-  -webkit-user-select: none;
-}
-
-/* 拖放区域 */
-.drop-zone {
-  width: 100%;
-  padding: 2.5rem 2rem;
-  background: #ffffff;
-  border: 2px dashed #d1d5db;
-  border-radius: 12px;
-  text-align: center;
-  transition: all 0.2s ease;
-}
-
-.drop-zone:hover {
-  border-color: #3b82f6;
-  background: #fafbff;
-}
-
-.drop-zone.is-dragging {
-  border-color: #3b82f6;
-  border-style: solid;
-  background: #eff6ff;
-  transform: scale(1.01);
-  box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.1);
-}
-
-.drop-zone.is-loading {
-  border-color: #93c5fd;
-  background: #f0f7ff;
-}
-
-.drop-zone-content {
-  pointer-events: none;
-}
-
-.drop-icon {
-  margin-bottom: 0.75rem;
-}
-
-.drop-icon i {
-  font-size: 48px;
-  color: #9ca3af;
-}
-
-.drop-zone:hover .drop-icon i,
-.drop-zone.is-dragging .drop-icon i {
-  color: #3b82f6;
-}
-
-.drop-title {
-  font-size: 16px;
-  font-weight: 600;
-  color: #374151;
-  margin: 0 0 0.5rem;
-  user-select: none;
-  -webkit-user-select: none;
-}
-
-.drop-hint {
-  font-size: 13px;
-  color: #9ca3af;
-  margin: 0;
-  user-select: none;
-  -webkit-user-select: none;
-}
-
-.file-type {
-  font-weight: 500;
-}
-
-.file-type.srt {
-  color: #3b82f6;
-}
-
-.file-type.audio {
-  color: #10b981;
-}
-
-/* 加载状态 */
-.loading-content {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 1rem;
-}
-
-.loading-spinner {
-  width: 36px;
-  height: 36px;
-  border: 3px solid #e5e7eb;
-  border-top-color: #3b82f6;
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.loading-text {
-  font-size: 14px;
-  color: #6b7280;
-  margin: 0;
-  user-select: none;
-  -webkit-user-select: none;
-}
-
-/* 操作按钮 */
-.action-buttons {
-  display: flex;
-  gap: 0.75rem;
-  width: 100%;
-}
-
-.action-btn {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
-  padding: 0.75rem 1rem;
-  font-size: 14px;
-  font-weight: 500;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  border: none;
-}
-
-.action-btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.action-btn.primary {
-  background: #3b82f6;
-  color: white;
-}
-
-.action-btn.primary:hover:not(:disabled) {
-  background: #2563eb;
-}
-
-.action-btn.secondary {
-  background: #ffffff;
-  color: #374151;
-  border: 1px solid #d1d5db;
-}
-
-.action-btn.secondary:hover:not(:disabled) {
-  background: #f9fafb;
-  border-color: #9ca3af;
-}
-
-.action-btn .el-icon {
-  font-size: 18px;
-}
-
-/* 提示文字 */
-.tip-text {
-  font-size: 12px;
-  color: #9ca3af;
-  margin: 0;
-  text-align: center;
-  user-select: none;
-  -webkit-user-select: none;
-}
-
-/* 转录区域 */
-.transcription-section {
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.5rem;
-  padding-top: 0.5rem;
-  border-top: 1px solid #e5e7eb;
-}
-
-.action-btn.transcription {
-  width: 100%;
-  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-  color: white;
-  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);
-}
-
-.action-btn.transcription:hover:not(:disabled) {
-  background: linear-gradient(135deg, #059669 0%, #047857 100%);
-  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4);
-}
-
-.transcription-hint {
-  font-size: 11px;
-  color: #9ca3af;
-  margin: 0;
-  text-align: center;
-  user-select: none;
-  -webkit-user-select: none;
-}
-
-/* 转录对话框 */
-.transcription-dialog {
-  padding: 1rem 0;
-}
-
-.progress-content {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-
-.progress-message {
-  font-size: 14px;
-  color: #6b7280;
-  text-align: center;
-  margin: 0;
-}
-
-/* 快捷键栏 */
-.shortcuts-bar {
-  display: flex;
-  gap: 2rem;
-  padding: 0.875rem 1.5rem;
-  background: #ffffff;
-  border: 1px solid #e5e7eb;
-  border-radius: 10px;
-}
-
-.shortcut-item {
-  display: flex;
-  align-items: center;
-  gap: 0.625rem;
-}
-
-.shortcut-label {
-  font-size: 13px;
-  color: #666;
-  user-select: none;
-  -webkit-user-select: none;
-}
-
-.shortcut-keys {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.key-cap {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 28px;
-  height: 28px;
-  padding: 0 8px;
-  background: #f5f5f5;
-  border: 1px solid #e0e0e0;
-  border-radius: 6px;
-  font-size: 13px;
-  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif;
-  color: #555;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
-}
-
-/* 最近打开的文件 */
-.recent-files {
-  width: 100%;
-  margin-top: -0.5rem;
-}
-
-.recent-header {
-  display: flex;
-  align-items: center;
-  gap: 0.375rem;
-  font-size: 13px;
-  font-weight: 500;
-  color: #6b7280;
-  margin-bottom: 0.5rem;
-  user-select: none;
-  -webkit-user-select: none;
-}
-
-.recent-header .el-icon {
-  font-size: 14px;
-}
-
-.recent-list {
+.brand-text {
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
 
+.brand-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: #222;
+  margin: 0;
+  letter-spacing: -0.3px;
+}
+
+.brand-desc {
+  font-size: 13px;
+  color: #888;
+  margin: 0;
+}
+
+/* 区块标题 */
+.section-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: #555;
+  margin: 0 0 0.625rem;
+}
+
+/* 操作按钮组 */
+.action-buttons {
+  display: flex;
+  gap: 0.75rem;
+}
+
+/* 主按钮 */
+.primary-btn {
+  flex: 1;
+  padding: 0.875rem 1.25rem;
+  background: #409eff;
+  color: white;
+  font-size: 14px;
+  font-weight: 500;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.primary-btn:hover:not(:disabled) {
+  background: #337ecc;
+}
+
+.primary-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+/* 次要按钮 */
+.secondary-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.875rem 1rem;
+  background: rgba(64, 158, 255, 0.08);
+  color: #666;
+  font-size: 14px;
+  font-weight: 500;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.secondary-btn:hover:not(:disabled) {
+  background: rgba(64, 158, 255, 0.15);
+  color: #409eff;
+}
+
+.secondary-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.secondary-btn i {
+  font-size: 18px;
+}
+
+/* 最近文件 */
+.recent-section {
+  margin-top: 0.25rem;
+}
+
+.recent-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
 .recent-item {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem 0.75rem;
-  background: #ffffff;
-  border: 1px solid #e5e7eb;
-  border-radius: 6px;
+  gap: 0.625rem;
+  padding: 0.625rem 0.75rem;
+  background: rgba(255, 255, 255, 0.6);
+  border-radius: 8px;
   cursor: pointer;
   transition: all 0.15s ease;
 }
 
 .recent-item:hover {
-  background: #f0f7ff;
-  border-color: #3b82f6;
+  background: rgba(255, 255, 255, 0.9);
 }
 
 .recent-item .file-icon {
-  font-size: 16px;
-  color: #3b82f6;
+  font-size: 20px;
+  color: #409eff;
   flex-shrink: 0;
 }
 
-.recent-item .file-name {
+.recent-name {
   flex: 1;
   font-size: 13px;
-  color: #374151;
+  color: #333;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  user-select: none;
-  -webkit-user-select: none;
 }
 
-.recent-item .file-time {
+.recent-time {
   font-size: 12px;
-  color: #9ca3af;
+  color: #999;
   flex-shrink: 0;
-  user-select: none;
-  -webkit-user-select: none;
+}
+
+
+
+/* 拖放遮罩 */
+.drag-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(64, 158, 255, 0.06);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.drag-hint {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 2rem 3rem;
+  background: white;
+  border-radius: 16px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+}
+
+.drag-hint i {
+  font-size: 48px;
+  color: #409eff;
+}
+
+.drag-hint p {
+  font-size: 15px;
+  font-weight: 500;
+  color: #333;
+  margin: 0;
+}
+
+/* 转录对话框 */
+.progress-content {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 0.5rem 0;
+}
+
+.progress-message {
+  font-size: 13px;
+  color: #666;
+  text-align: center;
+  margin: 0;
 }
 </style>
