@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
-import { DocumentCopy, VideoPlay, Delete, WarningFilled } from '@element-plus/icons-vue'
+import { DocumentCopy, VideoPlay, VideoPause, Delete, WarningFilled } from '@element-plus/icons-vue'
 import SearchReplaceBar from './SearchReplaceBar.vue'
 import type { SubtitleEntry } from '@/types/subtitle'
 
@@ -16,6 +16,7 @@ const props = defineProps<{
   currentFilePath: string | null
   formatTimeStamp: (ts: any) => string
   showOnlyNeedsCorrection?: boolean // 只显示需要校正的字幕
+  loopingEntryId?: number | null // 当前正在循环播放的字幕 ID
 }>()
 
 const emit = defineEmits<{
@@ -26,6 +27,7 @@ const emit = defineEmits<{
   (e: 'double-click-entry', id: number): void
   (e: 'copy-text', id: number): void
   (e: 'play-audio', id: number): void
+  (e: 'stop-audio'): void
   (e: 'delete-entry', id: number): void
   (e: 'replace-one'): void
   (e: 'replace-all'): void
@@ -275,13 +277,14 @@ defineExpose({
               <el-button
                 v-if="hasAudio"
                 link
-                type="primary"
+                :type="loopingEntryId === entry.id ? 'warning' : 'primary'"
                 size="small"
-                title="播放字幕音频"
-                @click.stop="emit('play-audio', entry.id)"
+                :title="loopingEntryId === entry.id ? '停止播放' : '播放字幕音频'"
+                @click.stop="loopingEntryId === entry.id ? emit('stop-audio') : emit('play-audio', entry.id)"
               >
                 <template #icon>
-                  <VideoPlay />
+                  <VideoPause v-if="loopingEntryId === entry.id" />
+                  <VideoPlay v-else />
                 </template>
               </el-button>
               <el-button

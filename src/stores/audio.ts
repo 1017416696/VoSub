@@ -39,6 +39,17 @@ export const useAudioStore = defineStore('audio', () => {
     playbackRate: 1,
   })
 
+  // 片段循环播放状态
+  const segmentLoop = ref<{
+    enabled: boolean
+    startTime: number
+    endTime: number
+  }>({
+    enabled: false,
+    startTime: 0,
+    endTime: 0,
+  })
+
   // 从当前 tab 获取音频信息
   const audioFile = computed(() => {
     const tab = tabManager.activeTab
@@ -332,6 +343,12 @@ export const useAudioStore = defineStore('audio', () => {
         if (tabManager.activeTab) {
           tabManager.activeTab.audio.currentTime = playerState.value.currentTime
         }
+        
+        // 片段循环：检查是否到达结束时间
+        if (segmentLoop.value.enabled && playerState.value.currentTime >= segmentLoop.value.endTime) {
+          currentHowl.value.seek(segmentLoop.value.startTime)
+          playerState.value.currentTime = segmentLoop.value.startTime
+        }
       }
     }, 100)
   }
@@ -339,6 +356,8 @@ export const useAudioStore = defineStore('audio', () => {
   // 播放控制
   const togglePlay = () => {
     if (!currentHowl.value) return
+    // 切换播放时退出片段循环模式
+    stopSegmentLoop()
     if (playerState.value.isPlaying) {
       currentHowl.value.pause()
     } else {
@@ -396,6 +415,30 @@ export const useAudioStore = defineStore('audio', () => {
       tabManager.activeTab.audio.playbackRate = playerState.value.playbackRate
     }
   }
+
+  // 片段循环播放
+  const playSegmentLoop = (startTime: number, endTime: number) => {
+    if (!currentHowl.value) return
+    
+    segmentLoop.value = {
+      enabled: true,
+      startTime,
+      endTime,
+    }
+    
+    // 跳转到开始时间并播放
+    currentHowl.value.seek(startTime)
+    playerState.value.currentTime = startTime
+    currentHowl.value.play()
+  }
+
+  // 停止片段循环
+  const stopSegmentLoop = () => {
+    segmentLoop.value.enabled = false
+  }
+
+  // 检查是否在片段循环模式
+  const isSegmentLoopMode = () => segmentLoop.value.enabled
 
   // 卸载当前 tab 的音频
   const unloadAudio = () => {
@@ -539,6 +582,7 @@ export const useAudioStore = defineStore('audio', () => {
     currentAudio,
     isGeneratingWaveform,
     waveformProgress,
+    segmentLoop,
 
     // 方法
     loadAudio,
@@ -552,6 +596,9 @@ export const useAudioStore = defineStore('audio', () => {
     increaseVolume,
     decreaseVolume,
     setPlaybackRate,
+    playSegmentLoop,
+    stopSegmentLoop,
+    isSegmentLoopMode,
     cleanup,
     formatTime,
     generateWaveform,

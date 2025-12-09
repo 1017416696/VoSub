@@ -72,6 +72,20 @@ const waveformZoomLevel = computed(() => {
   return waveformViewerRef.value ? Math.round(waveformViewerRef.value.zoomLevel * 100) : 100
 })
 
+// 当前正在循环播放的字幕 ID
+const loopingEntryId = computed(() => {
+  if (!audioStore.segmentLoop.enabled) return null
+  // 根据循环的时间范围找到对应的字幕
+  const startMs = audioStore.segmentLoop.startTime * 1000
+  const endMs = audioStore.segmentLoop.endTime * 1000
+  const entry = subtitleStore.entries.find(e => {
+    const entryStartMs = timeStampToMs(e.startTime)
+    const entryEndMs = timeStampToMs(e.endTime)
+    return Math.abs(entryStartMs - startMs) < 10 && Math.abs(entryEndMs - endMs) < 10
+  })
+  return entry?.id ?? null
+})
+
 // 监听 tab 切换
 watch(() => tabManager.activeTabId, async () => {
   // 如果正在校正，取消校正任务
@@ -106,7 +120,8 @@ watch(searchText, (query) => {
 
 // 监听音频播放进度
 watch(() => audioStore.playerState.currentTime, (currentTime) => {
-  if (hasAudio.value && !isUserSelectingEntry.value) {
+  // 片段循环模式下不自动滚动
+  if (hasAudio.value && !isUserSelectingEntry.value && !audioStore.segmentLoop.enabled) {
     const entry = subtitleStore.getCurrentEntryByTime(currentTime)
     if (entry && selectedEntryId.value !== entry.id) {
       selectedEntryId.value = entry.id
@@ -300,14 +315,21 @@ const copySubtitleText = async (id: number) => {
   }
 }
 
-// 播放字幕音频
+// 播放字幕音频（片段循环模式）
 const playSubtitleAudio = (id: number) => {
   if (!hasAudio.value) return
   const entry = subtitleStore.entries.find((e) => e.id === id)
   if (!entry) return
-  const timeMs = timeStampToMs(entry.startTime)
-  audioStore.seek(timeMs / 1000)
-  audioStore.play()
+  const startTimeMs = timeStampToMs(entry.startTime)
+  const endTimeMs = timeStampToMs(entry.endTime)
+  // 使用片段循环播放，不会触发自动滚动
+  audioStore.playSegmentLoop(startTimeMs / 1000, endTimeMs / 1000)
+}
+
+// 停止字幕音频循环播放
+const stopSubtitleAudio = () => {
+  audioStore.stopSegmentLoop()
+  audioStore.pause()
 }
 
 // 删除字幕项目
@@ -1261,6 +1283,7 @@ onBeforeUnmount(() => {
         :current-file-path="subtitleStore.currentFilePath"
         :format-time-stamp="subtitleStore.formatTimeStamp"
         :show-only-needs-correction="showOnlyNeedsCorrection"
+        :looping-entry-id="loopingEntryId"
         @update:search-text="searchText = $event"
         @update:replace-text="replaceText = $event"
         @update:show-replace="showReplace = $event"
@@ -1268,6 +1291,7 @@ onBeforeUnmount(() => {
         @double-click-entry="handleSubtitleDoubleClick"
         @copy-text="copySubtitleText"
         @play-audio="playSubtitleAudio"
+        @stop-audio="stopSubtitleAudio"
         @delete-entry="deleteSubtitleItem"
         @replace-one="replaceOne"
         @replace-all="replaceAll"
