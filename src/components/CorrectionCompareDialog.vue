@@ -2,6 +2,7 @@
 import { ref, computed, watch } from 'vue'
 import type { CorrectionEntry, CorrectionEntryWithChoice, CorrectionChoice } from '@/types/correction'
 import type { TimeStamp } from '@/types/subtitle'
+import { computeDiff, segmentsToDiffGroups, buildFinalText, type DiffGroup } from '@/utils/textDiff'
 
 const props = defineProps<{
   visible: boolean
@@ -18,15 +19,33 @@ const emit = defineEmits<{
 // 带选择状态的条目列表
 const entriesWithChoice = ref<CorrectionEntryWithChoice[]>([])
 
+// 每个条目的差异组
+const entryDiffGroups = ref<Map<number, DiffGroup[]>>(new Map())
+
 // 只显示有差异的条目
 const showOnlyDiff = ref(true)
 
-// 初始化选择状态
+// 当前展开进行细粒度编辑的条目 ID
+const expandedEntryId = ref<number | null>(null)
+
+// 初始化选择状态和差异组
 watch(() => props.entries, (newEntries) => {
   entriesWithChoice.value = newEntries.map(entry => ({
     ...entry,
-    choice: entry.has_diff ? 'corrected' : 'original' as CorrectionChoice
+    choice: entry.has_diff ? 'corrected' : 'original' as CorrectionChoice,
+    finalText: undefined
   }))
+
+  // 计算每个条目的差异
+  const diffMap = new Map<number, DiffGroup[]>()
+  newEntries.forEach(entry => {
+    if (entry.has_diff) {
+      const segments = computeDiff(entry.original, entry.corrected)
+      const groups = segmentsToDiffGroups(segments)
+      diffMap.set(entry.id, groups)
+    }
+  })
+  entryDiffGroups.value = diffMap
 }, { immediate: true })
 
 // 过滤后的条目
@@ -41,7 +60,11 @@ const filteredEntries = computed(() => {
 const stats = computed(() => {
   const total = entriesWithChoice.value.length
   const diffCount = entriesWithChoice.value.filter(e => e.has_diff).length
-  const chosenCorrected = entriesWithChoice.value.filter(e => e.choice === 'corrected' && e.has_diff).length
+  const chosenCorrected = entriesWithChoice.value.filter(e => {
+    if (!e.has_diff) return false
+    if (e.finalText !== undefined) return true // 有细粒度编辑
+    return e.choice === 'corrected'
+  }).length
   return { total, diffCount, chosenCorrected }
 })
 
@@ -51,23 +74,105 @@ function formatTime(ts: TimeStamp): string {
   return `${pad(ts.hours)}:${pad(ts.minutes)}:${pad(ts.seconds)},${pad(ts.milliseconds, 3)}`
 }
 
-// 切换单条选择
-function toggleChoice(entry: CorrectionEntryWithChoice) {
-  entry.choice = entry.choice === 'original' ? 'corrected' : 'original'
+// 获取条目的差异组
+function getDiffGroups(entryId: number): DiffGroup[] {
+  return entryDiffGroups.value.get(entryId) || []
 }
 
-// 全部采用原文
+// 切换差异组的选择
+function toggleDiffGroup(entryId: number, groupId: number) {
+  const groups = entryDiffGroups.value.get(entryId)
+  if (!groups) return
+
+  const group = groups.find(g => g.id === groupId)
+  if (group && group.type === 'change') {
+    group.useNew = !group.useNew
+    // 更新最终文本
+    updateFinalText(entryId)
+  }
+}
+
+// 更新条目的最终文本
+function updateFinalText(entryId: number) {
+  const groups = entryDiffGroups.value.get(entryId)
+  const entry = entriesWithChoice.value.find(e => e.id === entryId)
+  if (!groups || !entry) return
+
+  const finalText = buildFinalText(groups)
+  entry.finalText = finalText
+  // 如果最终文本与原文相同，设为 original；与校正相同，设为 corrected
+  if (finalText === entry.original) {
+    entry.choice = 'original'
+    entry.finalText = undefined
+  } else if (finalText === entry.corrected) {
+    entry.choice = 'corrected'
+    entry.finalText = undefined
+  } else {
+    entry.choice = 'corrected' // 混合状态
+  }
+}
+
+// 切换展开状态
+function toggleExpand(entryId: number) {
+  expandedEntryId.value = expandedEntryId.value === entryId ? null : entryId
+}
+
+// 快速选择：全部采用原文
 function useAllOriginal() {
   entriesWithChoice.value.forEach(e => {
-    if (e.has_diff) e.choice = 'original'
+    if (e.has_diff) {
+      e.choice = 'original'
+      e.finalText = undefined
+      // 重置差异组
+      const groups = entryDiffGroups.value.get(e.id)
+      if (groups) {
+        groups.forEach(g => { if (g.type === 'change') g.useNew = false })
+      }
+    }
   })
 }
 
-// 全部采用校正
+// 快速选择：全部采用校正
 function useAllCorrected() {
   entriesWithChoice.value.forEach(e => {
-    if (e.has_diff) e.choice = 'corrected'
+    if (e.has_diff) {
+      e.choice = 'corrected'
+      e.finalText = undefined
+      // 重置差异组
+      const groups = entryDiffGroups.value.get(e.id)
+      if (groups) {
+        groups.forEach(g => { if (g.type === 'change') g.useNew = true })
+      }
+    }
   })
+}
+
+// 单条快速选择原文
+function useOriginal(entry: CorrectionEntryWithChoice) {
+  entry.choice = 'original'
+  entry.finalText = undefined
+  const groups = entryDiffGroups.value.get(entry.id)
+  if (groups) {
+    groups.forEach(g => { if (g.type === 'change') g.useNew = false })
+  }
+}
+
+// 单条快速选择校正
+function useCorrected(entry: CorrectionEntryWithChoice) {
+  entry.choice = 'corrected'
+  entry.finalText = undefined
+  const groups = entryDiffGroups.value.get(entry.id)
+  if (groups) {
+    groups.forEach(g => { if (g.type === 'change') g.useNew = true })
+  }
+}
+
+// 获取预览文本
+function getPreviewText(entry: CorrectionEntryWithChoice): string {
+  if (entry.finalText !== undefined) {
+    return entry.finalText
+  }
+  return entry.choice === 'corrected' ? entry.corrected : entry.original
 }
 
 // 确认应用
@@ -112,43 +217,99 @@ function handleCancel() {
           v-for="entry in filteredEntries"
           :key="entry.id"
           class="compare-item"
-          :class="{ 'has-diff': entry.has_diff }"
+          :class="{ 'has-diff': entry.has_diff, 'expanded': expandedEntryId === entry.id }"
         >
           <div class="item-header">
-            <span class="item-id">#{{ entry.id }}</span>
-            <span class="item-time">
-              {{ formatTime(entry.start_time) }} → {{ formatTime(entry.end_time) }}
-            </span>
+            <div class="item-info">
+              <span class="item-id">#{{ entry.id }}</span>
+              <span class="item-time">
+                {{ formatTime(entry.start_time) }} → {{ formatTime(entry.end_time) }}
+              </span>
+            </div>
+            <div class="item-actions" v-if="entry.has_diff">
+              <button
+                class="btn-small"
+                :class="{ active: entry.choice === 'original' && !entry.finalText }"
+                @click.stop="useOriginal(entry)"
+              >
+                原文
+              </button>
+              <button
+                class="btn-small"
+                :class="{ active: entry.choice === 'corrected' && !entry.finalText }"
+                @click.stop="useCorrected(entry)"
+              >
+                校正
+              </button>
+              <button
+                class="btn-small btn-edit"
+                :class="{ active: expandedEntryId === entry.id }"
+                @click.stop="toggleExpand(entry.id)"
+              >
+                细调
+              </button>
+            </div>
           </div>
 
-          <div class="item-content">
-            <!-- 原文 -->
-            <div
-              class="text-box original"
-              :class="{ selected: entry.choice === 'original' }"
-              @click="entry.has_diff && (entry.choice = 'original')"
-            >
-              <div class="text-label">原文</div>
-              <div class="text-content">{{ entry.original }}</div>
+          <!-- 简洁视图：差异高亮预览 -->
+          <div v-if="expandedEntryId !== entry.id" class="item-preview">
+            <div class="preview-row">
+              <span class="preview-label">原</span>
+              <span class="preview-text">
+                <template v-for="group in getDiffGroups(entry.id)" :key="group.id">
+                  <span v-if="group.type === 'equal'">{{ group.original }}</span>
+                  <span v-else class="diff-delete" :class="{ 'not-used': group.useNew }">
+                    {{ group.original }}
+                  </span>
+                </template>
+                <span v-if="!entry.has_diff">{{ entry.original }}</span>
+              </span>
             </div>
+            <div class="preview-row">
+              <span class="preview-label">新</span>
+              <span class="preview-text">
+                <template v-for="group in getDiffGroups(entry.id)" :key="group.id">
+                  <span v-if="group.type === 'equal'">{{ group.corrected }}</span>
+                  <span v-else class="diff-insert" :class="{ 'not-used': !group.useNew }">
+                    {{ group.corrected }}
+                  </span>
+                </template>
+                <span v-if="!entry.has_diff">{{ entry.corrected }}</span>
+              </span>
+            </div>
+          </div>
 
-            <!-- 校正 -->
-            <div
-              class="text-box corrected"
-              :class="{ selected: entry.choice === 'corrected' }"
-              @click="entry.has_diff && (entry.choice = 'corrected')"
-            >
-              <div class="text-label">校正</div>
-              <div class="text-content">{{ entry.corrected }}</div>
+          <!-- 展开视图：可点击选择的差异片段 -->
+          <div v-else class="item-expanded">
+            <div class="diff-editor">
+              <div class="diff-hint">点击高亮部分切换使用原文或校正</div>
+              <div class="diff-segments">
+                <template v-for="group in getDiffGroups(entry.id)" :key="group.id">
+                  <span v-if="group.type === 'equal'" class="seg-equal">{{ group.original }}</span>
+                  <span
+                    v-else
+                    class="seg-change"
+                    :class="{ 'use-new': group.useNew }"
+                    @click="toggleDiffGroup(entry.id, group.id)"
+                  >
+                    <span class="seg-original" :class="{ active: !group.useNew }">{{ group.original }}</span>
+                    <span class="seg-arrow">→</span>
+                    <span class="seg-corrected" :class="{ active: group.useNew }">{{ group.corrected }}</span>
+                  </span>
+                </template>
+              </div>
+            </div>
+            <div class="result-preview">
+              <span class="result-label">结果预览：</span>
+              <span class="result-text">{{ getPreviewText(entry) }}</span>
             </div>
           </div>
 
           <!-- 状态标签 -->
           <div class="item-status">
             <span v-if="!entry.has_diff" class="status-tag same">无差异</span>
-            <span v-else-if="entry.choice === 'corrected'" class="status-tag use-corrected">
-              采用校正
-            </span>
+            <span v-else-if="entry.finalText" class="status-tag use-mixed">自定义</span>
+            <span v-else-if="entry.choice === 'corrected'" class="status-tag use-corrected">采用校正</span>
             <span v-else class="status-tag use-original">采用原文</span>
           </div>
         </div>
@@ -263,10 +424,21 @@ function handleCancel() {
   border-color: var(--warning-color, #f0ad4e);
 }
 
+.compare-item.expanded {
+  border-color: var(--primary-color, #007aff);
+  box-shadow: 0 2px 8px rgba(0, 122, 255, 0.15);
+}
+
 .item-header {
   display: flex;
-  gap: 12px;
+  justify-content: space-between;
+  align-items: center;
   margin-bottom: 12px;
+}
+
+.item-info {
+  display: flex;
+  gap: 12px;
   font-size: 13px;
 }
 
@@ -280,42 +452,193 @@ function handleCancel() {
   font-family: monospace;
 }
 
-.item-content {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
+.item-actions {
+  display: flex;
+  gap: 6px;
 }
 
-.text-box {
-  padding: 12px;
-  border: 2px solid var(--border-color, #e0e0e0);
-  border-radius: 6px;
+.btn-small {
+  padding: 4px 10px;
+  border: 1px solid var(--border-color, #ddd);
+  background: var(--bg-color, #fff);
+  border-radius: 4px;
+  font-size: 12px;
   cursor: pointer;
   transition: all 0.2s;
 }
 
-.text-box:hover {
+.btn-small:hover {
+  background: var(--bg-hover, #f0f0f0);
+}
+
+.btn-small.active {
+  background: var(--primary-color, #007aff);
   border-color: var(--primary-color, #007aff);
+  color: #fff;
 }
 
-.text-box.selected {
-  border-color: var(--success-color, #28a745);
-  background: rgba(40, 167, 69, 0.05);
+.btn-edit {
+  background: var(--bg-secondary, #f5f5f5);
 }
 
-.text-label {
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  color: var(--text-secondary, #666);
-  margin-bottom: 6px;
+.btn-edit.active {
+  background: var(--warning-color, #f0ad4e);
+  border-color: var(--warning-color, #f0ad4e);
+  color: #fff;
 }
 
-.text-content {
+/* 预览视图 */
+.item-preview {
   font-size: 14px;
-  line-height: 1.5;
-  white-space: pre-wrap;
+  line-height: 1.6;
+}
+
+.preview-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.preview-label {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.preview-row:first-child .preview-label {
+  background: rgba(220, 53, 69, 0.1);
+  color: #dc3545;
+}
+
+.preview-row:last-child .preview-label {
+  background: rgba(40, 167, 69, 0.1);
+  color: #28a745;
+}
+
+.preview-text {
+  flex: 1;
   word-break: break-word;
+}
+
+.diff-delete {
+  background: rgba(220, 53, 69, 0.2);
+  color: #dc3545;
+  text-decoration: line-through;
+  padding: 0 2px;
+  border-radius: 2px;
+}
+
+.diff-delete.not-used {
+  background: rgba(220, 53, 69, 0.1);
+  text-decoration: none;
+  color: inherit;
+}
+
+.diff-insert {
+  background: rgba(40, 167, 69, 0.2);
+  color: #28a745;
+  padding: 0 2px;
+  border-radius: 2px;
+}
+
+.diff-insert.not-used {
+  background: rgba(40, 167, 69, 0.1);
+  text-decoration: line-through;
+  color: var(--text-secondary, #999);
+}
+
+/* 展开编辑视图 */
+.item-expanded {
+  background: var(--bg-secondary, #f8f9fa);
+  border-radius: 6px;
+  padding: 12px;
+}
+
+.diff-editor {
+  margin-bottom: 12px;
+}
+
+.diff-hint {
+  font-size: 12px;
+  color: var(--text-secondary, #666);
+  margin-bottom: 8px;
+}
+
+.diff-segments {
+  font-size: 14px;
+  line-height: 2;
+  word-break: break-word;
+}
+
+.seg-equal {
+  color: var(--text-color, #333);
+}
+
+.seg-change {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  margin: 2px;
+  border-radius: 4px;
+  background: var(--bg-color, #fff);
+  border: 1px solid var(--border-color, #ddd);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.seg-change:hover {
+  border-color: var(--primary-color, #007aff);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.seg-original {
+  color: #dc3545;
+  text-decoration: line-through;
+  opacity: 0.5;
+}
+
+.seg-original.active {
+  text-decoration: none;
+  opacity: 1;
+  font-weight: 500;
+}
+
+.seg-arrow {
+  color: var(--text-secondary, #999);
+  font-size: 12px;
+}
+
+.seg-corrected {
+  color: #28a745;
+  opacity: 0.5;
+}
+
+.seg-corrected.active {
+  opacity: 1;
+  font-weight: 500;
+}
+
+.result-preview {
+  padding-top: 12px;
+  border-top: 1px solid var(--border-color, #e0e0e0);
+  font-size: 13px;
+}
+
+.result-label {
+  color: var(--text-secondary, #666);
+  margin-right: 8px;
+}
+
+.result-text {
+  color: var(--text-color, #333);
+  font-weight: 500;
 }
 
 .item-status {
@@ -338,12 +661,17 @@ function handleCancel() {
 
 .status-tag.use-corrected {
   background: rgba(40, 167, 69, 0.1);
-  color: var(--success-color, #28a745);
+  color: #28a745;
 }
 
 .status-tag.use-original {
   background: rgba(0, 122, 255, 0.1);
   color: var(--primary-color, #007aff);
+}
+
+.status-tag.use-mixed {
+  background: rgba(240, 173, 78, 0.1);
+  color: #f0ad4e;
 }
 
 .empty-state {

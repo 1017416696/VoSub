@@ -2,6 +2,7 @@
 import { ref, computed, watch, nextTick } from 'vue'
 import { Delete } from '@element-plus/icons-vue'
 import type { SubtitleEntry, TimeStamp } from '@/types/subtitle'
+import { computeDiff, segmentsToDiffGroups, buildFinalText, type DiffGroup } from '@/utils/textDiff'
 
 const props = defineProps<{
   entry: SubtitleEntry | null
@@ -24,10 +25,10 @@ const emit = defineEmits<{
   (e: 'text-blur'): void
   (e: 'text-input'): void
   (e: 'correct-entry'): void
-  (e: 'apply-correction'): void
+  (e: 'apply-correction', text?: string): void
   (e: 'dismiss-correction'): void
   (e: 'toggle-correction-mark'): void
-  (e: 'apply-suggestion'): void
+  (e: 'apply-suggestion', text?: string): void
   (e: 'dismiss-suggestion'): void
 }>()
 
@@ -36,6 +37,10 @@ const editingStartTime = ref('')
 const editingEndTime = ref('')
 const textareaInputRef = ref<any>(null)
 
+// 细粒度编辑状态
+const correctionDiffGroups = ref<DiffGroup[]>([])
+const suggestionDiffGroups = ref<DiffGroup[]>([])
+
 // 监听选中字幕变化，更新编辑文本和时间
 watch(() => props.entry, (entry) => {
   if (entry) {
@@ -43,7 +48,34 @@ watch(() => props.entry, (entry) => {
     editingStartTime.value = props.formatTimeStamp(entry.startTime)
     editingEndTime.value = props.formatTimeStamp(entry.endTime)
   }
+  // 重置细粒度编辑状态
+  correctionDiffGroups.value = []
+  suggestionDiffGroups.value = []
 }, { immediate: true, deep: true })
+
+// 监听校正结果变化，计算差异组并更新输入框
+watch(() => props.correctionResult, (result) => {
+  if (result && result.has_diff) {
+    const segments = computeDiff(result.original, result.corrected)
+    correctionDiffGroups.value = segmentsToDiffGroups(segments)
+    // 默认全部采用校正，更新输入框显示校正后的结果
+    editingText.value = result.corrected
+  } else {
+    correctionDiffGroups.value = []
+  }
+}, { immediate: true })
+
+// 监听建议变化，计算差异组并更新输入框
+watch(() => props.entry?.correctionSuggestion, (suggestion) => {
+  if (suggestion && props.entry) {
+    const segments = computeDiff(props.entry.text, suggestion)
+    suggestionDiffGroups.value = segmentsToDiffGroups(segments)
+    // 默认全部采用校正，更新输入框显示校正后的结果
+    editingText.value = suggestion
+  } else {
+    suggestionDiffGroups.value = []
+  }
+}, { immediate: true })
 
 // 计算时长显示
 const durationDisplay = computed(() => {
@@ -91,81 +123,77 @@ const focusTextarea = async () => {
   }
 }
 
-// 计算文本差异，返回带标记的 HTML
-const computeDiff = (original: string, corrected: string) => {
-  // 简单的字符级别差异对比
-  const result = {
-    originalHtml: '',
-    correctedHtml: ''
+// 切换差异组选择（校正结果）并同步更新输入框
+function toggleCorrectionGroup(groupId: number) {
+  const group = correctionDiffGroups.value.find(g => g.id === groupId)
+  if (group && group.type === 'change') {
+    group.useNew = !group.useNew
+    // 同步更新输入框
+    editingText.value = getCorrectionFinalText()
   }
-  
-  // 找出两个字符串的最长公共子序列
-  const lcs = (a: string, b: string): string => {
-    const m = a.length, n = b.length
-    const dp: number[][] = Array(m + 1).fill(null).map(() => Array(n + 1).fill(0))
-    
-    for (let i = 1; i <= m; i++) {
-      for (let j = 1; j <= n; j++) {
-        if (a[i - 1] === b[j - 1]) {
-          dp[i][j] = dp[i - 1][j - 1] + 1
-        } else {
-          dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1])
-        }
-      }
-    }
-    
-    // 回溯找出 LCS
-    let i = m, j = n
-    let result = ''
-    while (i > 0 && j > 0) {
-      if (a[i - 1] === b[j - 1]) {
-        result = a[i - 1] + result
-        i--; j--
-      } else if (dp[i - 1][j] > dp[i][j - 1]) {
-        i--
-      } else {
-        j--
-      }
-    }
-    return result
-  }
-  
-  const common = lcs(original, corrected)
-  
-  // 标记原文中被删除的字符
-  let commonIdx = 0
-  let origHtml = ''
-  for (const char of original) {
-    if (commonIdx < common.length && char === common[commonIdx]) {
-      origHtml += char
-      commonIdx++
-    } else {
-      origHtml += `<span class="diff-del">${char}</span>`
-    }
-  }
-  
-  // 标记校正文本中新增的字符
-  commonIdx = 0
-  let corrHtml = ''
-  for (const char of corrected) {
-    if (commonIdx < common.length && char === common[commonIdx]) {
-      corrHtml += char
-      commonIdx++
-    } else {
-      corrHtml += `<span class="diff-add">${char}</span>`
-    }
-  }
-  
-  result.originalHtml = origHtml
-  result.correctedHtml = corrHtml
-  return result
 }
 
-// 计算差异结果
-const diffResult = computed(() => {
-  if (!props.correctionResult) return null
-  return computeDiff(props.correctionResult.original, props.correctionResult.corrected)
-})
+// 切换差异组选择（建议）并同步更新输入框
+function toggleSuggestionGroup(groupId: number) {
+  const group = suggestionDiffGroups.value.find(g => g.id === groupId)
+  if (group && group.type === 'change') {
+    group.useNew = !group.useNew
+    // 同步更新输入框
+    editingText.value = getSuggestionFinalText()
+  }
+}
+
+// 获取校正结果的最终文本
+function getCorrectionFinalText(): string {
+  return buildFinalText(correctionDiffGroups.value)
+}
+
+// 获取建议的最终文本
+function getSuggestionFinalText(): string {
+  return buildFinalText(suggestionDiffGroups.value)
+}
+
+// 快速全选原文（校正结果）
+function useAllOriginalCorrection() {
+  correctionDiffGroups.value.forEach(g => {
+    if (g.type === 'change') g.useNew = false
+  })
+  editingText.value = getCorrectionFinalText()
+}
+
+// 快速全选校正（校正结果）
+function useAllCorrectedCorrection() {
+  correctionDiffGroups.value.forEach(g => {
+    if (g.type === 'change') g.useNew = true
+  })
+  editingText.value = getCorrectionFinalText()
+}
+
+// 快速全选原文（建议）
+function useAllOriginalSuggestion() {
+  suggestionDiffGroups.value.forEach(g => {
+    if (g.type === 'change') g.useNew = false
+  })
+  editingText.value = getSuggestionFinalText()
+}
+
+// 快速全选校正（建议）
+function useAllCorrectedSuggestion() {
+  suggestionDiffGroups.value.forEach(g => {
+    if (g.type === 'change') g.useNew = true
+  })
+  editingText.value = getSuggestionFinalText()
+}
+
+// 应用校正（使用输入框的内容，因为用户可能手动修改了）
+function handleApplyCorrection() {
+  emit('apply-correction', editingText.value)
+}
+
+// 应用建议（使用输入框的内容，因为用户可能手动修改了）
+function handleApplySuggestion() {
+  emit('apply-suggestion', editingText.value)
+}
 
 // 暴露给父组件
 defineExpose({
@@ -246,7 +274,7 @@ defineExpose({
     </div>
 
     <!-- 文本编辑卡片 -->
-    <div class="text-edit-card">
+    <div class="text-edit-card" :class="{ 'has-correction': entry?.correctionSuggestion || (correctionResult && correctionResult.has_diff) }">
       <div class="text-card-header">
         <div class="text-header-left">
           <svg class="text-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -255,7 +283,12 @@ defineExpose({
             <line x1="16" y1="13" x2="8" y2="13"/>
             <line x1="16" y1="17" x2="8" y2="17"/>
           </svg>
-          <span class="text-card-title">字幕内容</span>
+          <span class="text-card-title">
+            {{ (entry?.correctionSuggestion || (correctionResult && correctionResult.has_diff)) ? '校正结果' : '字幕内容' }}
+          </span>
+          <span v-if="entry?.correctionSuggestion || (correctionResult && correctionResult.has_diff)" class="result-hint">
+            可直接编辑
+          </span>
         </div>
         <span class="char-count">{{ editingText.length }} 字符</span>
       </div>
@@ -280,22 +313,52 @@ defineExpose({
             <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
             <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
           </svg>
-          <span>AI 校正建议（待确认）</span>
+          <span>校正建议</span>
+          <span class="diff-hint">点击高亮切换</span>
+        </div>
+        <div class="header-quick-actions">
+          <button class="quick-select-btn" @click="useAllOriginalSuggestion" title="全部使用原文">原文</button>
+          <button class="quick-select-btn" @click="useAllCorrectedSuggestion" title="全部使用校正">校正</button>
         </div>
       </div>
-      <div class="correction-compare">
-        <div class="correction-item original">
-          <span class="correction-label">原</span>
-          <span class="correction-text" v-html="computeDiff(entry.text, entry.correctionSuggestion).originalHtml"></span>
+      
+      <!-- 双行对比视图 -->
+      <div class="diff-compare">
+        <div class="diff-row original">
+          <span class="diff-label">原</span>
+          <span class="diff-text">
+            <template v-for="group in suggestionDiffGroups" :key="'orig-' + group.id">
+              <span v-if="group.type === 'equal'">{{ group.original }}</span>
+              <span
+                v-else-if="group.original"
+                class="diff-chunk delete"
+                :class="{ selected: !group.useNew }"
+                @click="toggleSuggestionGroup(group.id)"
+                title="点击切换"
+              >{{ group.original }}</span>
+            </template>
+          </span>
         </div>
-        <div class="correction-item corrected">
-          <span class="correction-label">新</span>
-          <span class="correction-text" v-html="computeDiff(entry.text, entry.correctionSuggestion).correctedHtml"></span>
+        <div class="diff-row corrected">
+          <span class="diff-label">新</span>
+          <span class="diff-text">
+            <template v-for="group in suggestionDiffGroups" :key="'corr-' + group.id">
+              <span v-if="group.type === 'equal'">{{ group.corrected }}</span>
+              <span
+                v-else-if="group.corrected"
+                class="diff-chunk insert"
+                :class="{ selected: group.useNew }"
+                @click="toggleSuggestionGroup(group.id)"
+                title="点击切换"
+              >{{ group.corrected }}</span>
+            </template>
+          </span>
         </div>
       </div>
+      
       <div class="correction-actions">
         <button class="correction-btn dismiss" @click="emit('dismiss-suggestion')">忽略</button>
-        <button class="correction-btn apply" @click="emit('apply-suggestion')">采用</button>
+        <button class="correction-btn apply" @click="handleApplySuggestion">采用</button>
       </div>
     </div>
 
@@ -308,21 +371,51 @@ defineExpose({
             <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
           </svg>
           <span>校正建议</span>
+          <span class="diff-hint">点击高亮切换</span>
+        </div>
+        <div class="header-quick-actions">
+          <button class="quick-select-btn" @click="useAllOriginalCorrection" title="全部使用原文">原文</button>
+          <button class="quick-select-btn" @click="useAllCorrectedCorrection" title="全部使用校正">校正</button>
         </div>
       </div>
-      <div class="correction-compare">
-        <div class="correction-item original">
-          <span class="correction-label">原</span>
-          <span class="correction-text" v-html="diffResult?.originalHtml"></span>
+      
+      <!-- 双行对比视图 -->
+      <div class="diff-compare">
+        <div class="diff-row original">
+          <span class="diff-label">原</span>
+          <span class="diff-text">
+            <template v-for="group in correctionDiffGroups" :key="'orig-' + group.id">
+              <span v-if="group.type === 'equal'">{{ group.original }}</span>
+              <span
+                v-else-if="group.original"
+                class="diff-chunk delete"
+                :class="{ selected: !group.useNew }"
+                @click="toggleCorrectionGroup(group.id)"
+                title="点击切换"
+              >{{ group.original }}</span>
+            </template>
+          </span>
         </div>
-        <div class="correction-item corrected">
-          <span class="correction-label">新</span>
-          <span class="correction-text" v-html="diffResult?.correctedHtml"></span>
+        <div class="diff-row corrected">
+          <span class="diff-label">新</span>
+          <span class="diff-text">
+            <template v-for="group in correctionDiffGroups" :key="'corr-' + group.id">
+              <span v-if="group.type === 'equal'">{{ group.corrected }}</span>
+              <span
+                v-else-if="group.corrected"
+                class="diff-chunk insert"
+                :class="{ selected: group.useNew }"
+                @click="toggleCorrectionGroup(group.id)"
+                title="点击切换"
+              >{{ group.corrected }}</span>
+            </template>
+          </span>
         </div>
       </div>
+      
       <div class="correction-actions">
         <button class="correction-btn dismiss" @click="emit('dismiss-correction')">忽略</button>
-        <button class="correction-btn apply" @click="emit('apply-correction')">采用</button>
+        <button class="correction-btn apply" @click="handleApplyCorrection">采用</button>
       </div>
     </div>
 
@@ -676,6 +769,29 @@ defineExpose({
   -webkit-user-select: none;
 }
 
+.result-hint {
+  font-size: 0.6875rem;
+  color: #94a3b8;
+  font-weight: 400;
+}
+
+/* 有校正时的样式 */
+.text-edit-card.has-correction {
+  border-color: #93c5fd;
+}
+
+.text-edit-card.has-correction .text-card-header {
+  background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+}
+
+.text-edit-card.has-correction .text-card-title {
+  color: #2563eb;
+}
+
+.text-edit-card.has-correction .text-icon {
+  color: #3b82f6;
+}
+
 .char-count {
   font-size: 0.75rem;
   color: #94a3b8;
@@ -846,6 +962,128 @@ defineExpose({
   color: #3b82f6;
 }
 
+.diff-hint {
+  font-size: 0.625rem;
+  color: #94a3b8;
+  font-weight: 400;
+  margin-left: 0.25rem;
+}
+
+.header-quick-actions {
+  display: flex;
+  gap: 0.375rem;
+}
+
+/* 双行对比样式 */
+.diff-compare {
+  display: flex;
+  flex-direction: column;
+}
+
+.diff-row {
+  display: flex;
+  align-items: flex-start;
+  padding: 0.625rem 1rem;
+  gap: 0.75rem;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.diff-row:last-child {
+  border-bottom: none;
+}
+
+.diff-row.original {
+  background: #fafafa;
+}
+
+.diff-row.corrected {
+  background: #f0fdf4;
+}
+
+.diff-label {
+  flex-shrink: 0;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  padding: 0.125rem 0.375rem;
+  border-radius: 3px;
+  min-width: 20px;
+  text-align: center;
+}
+
+.diff-row.original .diff-label {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+.diff-row.corrected .diff-label {
+  background: #dcfce7;
+  color: #16a34a;
+}
+
+.diff-row.result {
+  background: #eff6ff;
+  border-top: 1px dashed #93c5fd;
+}
+
+.diff-row.result .diff-label {
+  background: #dbeafe;
+  color: #2563eb;
+}
+
+.diff-row.result .result-text {
+  font-weight: 500;
+  color: #1e40af;
+}
+
+.diff-text {
+  flex: 1;
+  font-size: 0.875rem;
+  line-height: 1.6;
+  color: #1e293b;
+  word-break: break-word;
+}
+
+.diff-chunk {
+  padding: 0.0625rem 0.25rem;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.diff-chunk.delete {
+  background: #fecaca;
+  color: #dc2626;
+  text-decoration: line-through;
+  opacity: 0.5;
+}
+
+.diff-chunk.delete.selected {
+  background: #fca5a5;
+  text-decoration: none;
+  opacity: 1;
+  font-weight: 500;
+}
+
+.diff-chunk.delete:hover {
+  background: #fca5a5;
+}
+
+.diff-chunk.insert {
+  background: #bbf7d0;
+  color: #16a34a;
+  opacity: 0.5;
+}
+
+.diff-chunk.insert.selected {
+  background: #86efac;
+  opacity: 1;
+  font-weight: 500;
+}
+
+.diff-chunk.insert:hover {
+  background: #86efac;
+}
+
 .correction-compare {
   display: flex;
   flex-direction: column;
@@ -953,6 +1191,116 @@ defineExpose({
 
 .correction-btn.apply:hover {
   background: #2563eb;
+}
+
+/* 细粒度编辑样式 */
+.fine-tune-editor {
+  padding: 0.75rem 1rem;
+}
+
+.quick-select-btn {
+  padding: 0.25rem 0.5rem;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+  font-size: 0.6875rem;
+  color: #64748b;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.quick-select-btn:hover {
+  background: #eff6ff;
+  border-color: #93c5fd;
+  color: #3b82f6;
+}
+
+.diff-segments {
+  font-size: 0.875rem;
+  line-height: 1.8;
+  word-break: break-word;
+  padding: 0.5rem;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  margin-bottom: 0.75rem;
+}
+
+.seg-equal {
+  color: #1e293b;
+}
+
+.seg-change {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.125rem 0.375rem;
+  margin: 0.125rem;
+  border-radius: 4px;
+  background: #fef3c7;
+  border: 1px solid #fcd34d;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.seg-change:hover {
+  border-color: #f59e0b;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.seg-change.use-new {
+  background: #dcfce7;
+  border-color: #86efac;
+}
+
+.seg-original {
+  color: #dc2626;
+  text-decoration: line-through;
+  opacity: 0.5;
+}
+
+.seg-original.active {
+  text-decoration: none;
+  opacity: 1;
+  font-weight: 500;
+}
+
+.seg-arrow {
+  color: #94a3b8;
+  font-size: 0.625rem;
+}
+
+.seg-corrected {
+  color: #16a34a;
+  opacity: 0.5;
+}
+
+.seg-corrected.active {
+  opacity: 1;
+  font-weight: 500;
+}
+
+.result-preview {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+}
+
+.result-label {
+  font-size: 0.6875rem;
+  color: #94a3b8;
+  white-space: nowrap;
+}
+
+.result-text {
+  font-size: 0.8125rem;
+  color: #1e293b;
+  font-weight: 500;
+  word-break: break-word;
 }
 
 /* 无差异提示 */

@@ -44,4 +44,6 @@ export type CorrectionChoice = 'original' | 'corrected'
  */
 export interface CorrectionEntryWithChoice extends CorrectionEntry {
   choice: CorrectionChoice
+  /** 细粒度编辑后的最终文本（如果用户进行了字符级别的选择） */
+  finalText?: string
 }

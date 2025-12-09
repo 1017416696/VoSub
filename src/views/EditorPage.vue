@@ -769,10 +769,23 @@ const handleCorrectionConfirm = async (entries: CorrectionEntryWithChoice[]) => 
   let updatedCount = 0
   
   for (const entry of entries) {
-    if (entry.has_diff && entry.choice === 'corrected') {
+    if (!entry.has_diff) continue
+    
+    // 确定最终要使用的文本
+    let newText: string | null = null
+    
+    if (entry.finalText !== undefined) {
+      // 用户进行了细粒度编辑
+      newText = entry.finalText
+    } else if (entry.choice === 'corrected') {
+      // 用户选择采用校正
+      newText = entry.corrected
+    }
+    
+    if (newText !== null) {
       const subtitle = subtitleStore.entries.find(e => e.id === entry.id)
-      if (subtitle && subtitle.text !== entry.corrected) {
-        subtitleStore.updateEntryText(entry.id, entry.corrected)
+      if (subtitle && subtitle.text !== newText) {
+        subtitleStore.updateEntryText(entry.id, newText)
         updatedCount++
       }
     }
@@ -848,11 +861,12 @@ const handleCorrectSingleEntry = async () => {
   }
 }
 
-// 应用校正结果
-const handleApplyCorrection = async () => {
+// 应用校正结果（支持细粒度编辑传入自定义文本）
+const handleApplyCorrection = async (customText?: string) => {
   if (!currentEntry.value || !singleCorrectionResult.value) return
   
-  subtitleStore.updateEntryText(currentEntry.value.id, singleCorrectionResult.value.corrected)
+  const textToApply = customText ?? singleCorrectionResult.value.corrected
+  subtitleStore.updateEntryText(currentEntry.value.id, textToApply)
   if (subtitleStore.currentFilePath) {
     await subtitleStore.saveToFile()
   }
@@ -889,11 +903,19 @@ const handleToggleCorrectionMark = () => {
   }
 }
 
-// 应用批量校正建议
-const handleApplySuggestion = async () => {
+// 应用批量校正建议（支持细粒度编辑传入自定义文本）
+const handleApplySuggestion = async (customText?: string) => {
   if (!currentEntry.value) return
   
-  subtitleStore.applyCorrectionSuggestion(currentEntry.value.id)
+  if (customText !== undefined) {
+    // 使用自定义文本
+    subtitleStore.updateEntryText(currentEntry.value.id, customText)
+    // 清除建议
+    subtitleStore.dismissCorrectionSuggestion(currentEntry.value.id)
+  } else {
+    // 使用原始建议
+    subtitleStore.applyCorrectionSuggestion(currentEntry.value.id)
+  }
   
   // 保存文件
   if (subtitleStore.currentFilePath) {
