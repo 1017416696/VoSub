@@ -73,7 +73,20 @@ const waveformZoomLevel = computed(() => {
 })
 
 // 监听 tab 切换
-watch(() => tabManager.activeTabId, () => {
+watch(() => tabManager.activeTabId, async () => {
+  // 如果正在校正，取消校正任务
+  if (isCorrecting.value) {
+    try {
+      await invoke('cancel_firered_task')
+    } catch (e) {
+      console.warn('取消校正任务失败:', e)
+    }
+  }
+  
+  // 重置校正状态
+  isCorrecting.value = false
+  singleCorrectionResult.value = null
+  
   if (subtitleStore.entries.length > 0) {
     selectedEntryId.value = subtitleStore.entries[0]?.id ?? null
   } else {
@@ -208,7 +221,17 @@ const handleSaveAs = async () => {
 }
 
 // 选择字幕
-const selectEntry = (id: number) => {
+const selectEntry = async (id: number) => {
+  // 如果正在校正，取消校正任务
+  if (isCorrecting.value) {
+    try {
+      await invoke('cancel_firered_task')
+    } catch (e) {
+      console.warn('取消校正任务失败:', e)
+    }
+    isCorrecting.value = false
+  }
+  
   selectedEntryId.value = id
   isUserSelectingEntry.value = true
   // 切换字幕时清除校正结果
