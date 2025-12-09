@@ -15,6 +15,7 @@ use sensevoice_transcriber::{
 use firered_corrector::{
     check_firered_env, install_firered_env, correct_with_firered, correct_single_entry,
     uninstall_firered_env, cancel_firered_correction, preload_firered_service, is_service_running,
+    preload_audio_for_correction,
     FireRedEnvStatus, CorrectionEntry, SingleCorrectionResult,
 };
 use waveform_generator::{generate_waveform_with_progress, ProgressCallback};
@@ -258,6 +259,12 @@ async fn preload_firered() -> Result<String, String> {
 #[tauri::command]
 fn is_firered_service_running() -> bool {
     is_service_running()
+}
+
+/// 预加载音频文件到 FireRedASR 服务缓存
+#[tauri::command]
+async fn preload_audio_for_firered(audio_path: String) -> Result<String, String> {
+    preload_audio_for_correction(audio_path).await
 }
 
 /// 校正单条字幕
@@ -781,6 +788,7 @@ pub fn run() {
             correct_single_subtitle,
             preload_firered,
             is_firered_service_running,
+            preload_audio_for_firered,
             uninstall_firered,
             cancel_firered_task
         ])

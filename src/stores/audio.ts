@@ -307,6 +307,12 @@ export const useAudioStore = defineStore('audio', () => {
         duration: howl.duration(),
         loadTime: `${loadDuration}ms`,
       })
+      
+      // 异步预加载音频到 FireRed 服务缓存（不阻塞主流程）
+      invoke('preload_audio_for_firered', { audioPath: file.path }).catch((error) => {
+        // 预加载失败不影响主流程，只记录日志
+        logger.debug('FireRed 音频预加载跳过', { error: String(error) })
+      })
     } catch (error) {
       logger.error('读取音频文件失败', { path: file.path, error: String(error) })
       throw error

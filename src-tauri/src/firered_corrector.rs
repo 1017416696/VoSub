@@ -695,17 +695,22 @@ fn write_service_script() -> Result<PathBuf, String> {
     
     let script_content = r#"#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""FireRedASR 持久化服务 - 模型只加载一次"""
+"""FireRedASR 持久化服务 - 模型只加载一次，音频缓存优化"""
 
 import sys
 import json
 import os
 import tempfile
+import hashlib
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import urllib.parse
 
 # 全局模型变量
 MODEL = None
+# 音频缓存：{audio_path: (mtime, AudioSegment)}
+AUDIO_CACHE = {}
+# 最大缓存数量
+MAX_CACHE_SIZE = 3
 
 def load_model():
     global MODEL
@@ -718,6 +723,33 @@ def load_model():
         MODEL = FireRedAsr.from_pretrained("aed")
         print("Model loaded!", file=sys.stderr)
     return MODEL
+
+def get_cached_audio(audio_path):
+    """获取缓存的音频，如果文件已修改则重新加载"""
+    global AUDIO_CACHE
+    from pydub import AudioSegment
+    
+    try:
+        mtime = os.path.getmtime(audio_path)
+    except OSError:
+        mtime = 0
+    
+    if audio_path in AUDIO_CACHE:
+        cached_mtime, cached_audio = AUDIO_CACHE[audio_path]
+        if cached_mtime == mtime:
+            return cached_audio
+    
+    # 加载新音频
+    audio = AudioSegment.from_file(audio_path)
+    
+    # 清理旧缓存
+    if len(AUDIO_CACHE) >= MAX_CACHE_SIZE:
+        # 删除最早的缓存
+        oldest_key = next(iter(AUDIO_CACHE))
+        del AUDIO_CACHE[oldest_key]
+    
+    AUDIO_CACHE[audio_path] = (mtime, audio)
+    return audio
 
 def preserve_original_case(original, corrected):
     """保留原始文本中英文字母的大小写"""
@@ -761,8 +793,6 @@ class Handler(BaseHTTPRequestHandler):
         params = json.loads(post_data.decode('utf-8'))
         
         try:
-            from pydub import AudioSegment
-            
             audio_path = params['audio_path']
             start_ms = params['start_ms']
             end_ms = params['end_ms']
@@ -770,8 +800,8 @@ class Handler(BaseHTTPRequestHandler):
             language = params.get('language', 'zh')
             preserve_case = params.get('preserve_case', True)
             
-            # 切分音频
-            audio = AudioSegment.from_file(audio_path)
+            # 使用缓存的音频
+            audio = get_cached_audio(audio_path)
             chunk = audio[start_ms:end_ms]
             chunk = chunk.set_channels(1)
             chunk = chunk.set_frame_rate(16000)
@@ -824,6 +854,26 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_response(500)
                 self.end_headers()
                 self.wfile.write(str(e).encode())
+        elif self.path.startswith('/preload_audio?'):
+            # 预加载音频文件
+            try:
+                query = urllib.parse.urlparse(self.path).query
+                params = urllib.parse.parse_qs(query)
+                audio_path = params.get('path', [''])[0]
+                if audio_path:
+                    get_cached_audio(audio_path)
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'text/plain')
+                    self.end_headers()
+                    self.wfile.write(b'audio cached')
+                else:
+                    self.send_response(400)
+                    self.end_headers()
+                    self.wfile.write(b'missing path')
+            except Exception as e:
+                self.send_response(500)
+                self.end_headers()
+                self.wfile.write(str(e).encode())
         else:
             self.send_response(404)
             self.end_headers()
@@ -852,10 +902,35 @@ if __name__ == "__main__":
     Ok(script_path)
 }
 
-/// 检查服务是否运行
+// 服务状态缓存
+static SERVICE_RUNNING: Lazy<Arc<std::sync::atomic::AtomicBool>> = Lazy::new(|| Arc::new(std::sync::atomic::AtomicBool::new(false)));
+static LAST_SERVICE_CHECK: Lazy<Arc<std::sync::Mutex<std::time::Instant>>> = Lazy::new(|| Arc::new(std::sync::Mutex::new(std::time::Instant::now())));
+
+/// 检查服务是否运行（带缓存，5秒内不重复检查）
 pub fn is_service_running() -> bool {
+    // 如果缓存显示服务运行中，且距离上次检查不超过5秒，直接返回
+    let cached = SERVICE_RUNNING.load(Ordering::SeqCst);
+    if cached {
+        if let Ok(last_check) = LAST_SERVICE_CHECK.lock() {
+            if last_check.elapsed().as_secs() < 5 {
+                return true;
+            }
+        }
+    }
+    
+    // 实际检查服务状态
+    let running = check_service_health();
+    SERVICE_RUNNING.store(running, Ordering::SeqCst);
+    if let Ok(mut last_check) = LAST_SERVICE_CHECK.lock() {
+        *last_check = std::time::Instant::now();
+    }
+    running
+}
+
+/// 实际检查服务健康状态
+fn check_service_health() -> bool {
     std::process::Command::new("curl")
-        .args(["-s", "-o", "/dev/null", "-w", "%{http_code}", "http://127.0.0.1:18765/health"])
+        .args(["-s", "-o", "/dev/null", "-w", "%{http_code}", "--connect-timeout", "1", "http://127.0.0.1:18765/health"])
         .output()
         .map(|o| String::from_utf8_lossy(&o.stdout).trim() == "200")
         .unwrap_or(false)
@@ -877,16 +952,15 @@ fn stop_service() {
     }
 }
 
-/// 启动服务
+/// 启动服务（如果已运行则直接返回）
 fn start_service() -> Result<(), String> {
-    // 总是先写入最新的脚本
-    let script_path = write_service_script()?;
-    
-    // 如果服务已经在运行，先停止它以使用新脚本
+    // 快速检查：如果服务已经在运行，直接返回
     if is_service_running() {
-        stop_service();
+        return Ok(());
     }
     
+    // 服务未运行，需要启动
+    let script_path = write_service_script()?;
     let python_path = get_python_path()?;
     
     // 后台启动服务
@@ -898,10 +972,11 @@ fn start_service() -> Result<(), String> {
         .spawn()
         .map_err(|e| format!("启动服务失败: {}", e))?;
     
-    // 等待服务启动
-    for _ in 0..30 {
-        std::thread::sleep(std::time::Duration::from_millis(500));
-        if is_service_running() {
+    // 等待服务启动（缩短等待时间）
+    for _ in 0..20 {
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        if check_service_health() {
+            SERVICE_RUNNING.store(true, Ordering::SeqCst);
             return Ok(());
         }
     }
@@ -921,17 +996,62 @@ pub async fn preload_firered_service() -> Result<String, String> {
     // 启动服务
     start_service()?;
     
-    // 调用 /preload 端点预加载模型
-    let output = Command::new("curl")
-        .args(["-s", "http://127.0.0.1:18765/preload"])
-        .output()
+    // 使用 reqwest 调用 /preload 端点预加载模型
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+        .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
+    
+    let response = client
+        .get("http://127.0.0.1:18765/preload")
+        .send()
+        .await
         .map_err(|e| format!("预加载请求失败: {}", e))?;
     
-    if output.status.success() {
+    if response.status().is_success() {
         Ok("FireRedASR 服务已启动并预加载模型".to_string())
     } else {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        Err(format!("预加载失败: {}", stderr))
+        Err(format!("预加载失败: HTTP {}", response.status()))
+    }
+}
+
+/// 预加载音频文件到服务缓存
+/// 在打开音频文件时调用，可以加速后续的单条校正
+pub async fn preload_audio_for_correction(audio_path: String) -> Result<String, String> {
+    // 检查环境
+    let env_status = check_firered_env();
+    if !env_status.ready {
+        return Err("FireRedASR 环境未安装".to_string());
+    }
+    
+    // 确保服务运行
+    start_service()?;
+    
+    // 使用 reqwest 调用预加载音频端点
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(60))
+        .build()
+        .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
+    
+    // 简单的 URL 编码
+    let encoded_path = audio_path
+        .replace('%', "%25")
+        .replace(' ', "%20")
+        .replace('&', "%26")
+        .replace('?', "%3F")
+        .replace('#', "%23");
+    let url = format!("http://127.0.0.1:18765/preload_audio?path={}", encoded_path);
+    
+    let response = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("预加载音频请求失败: {}", e))?;
+    
+    if response.status().is_success() {
+        Ok("音频已预加载到缓存".to_string())
+    } else {
+        Err(format!("预加载音频失败: HTTP {}", response.status()))
     }
 }
 
@@ -973,25 +1093,26 @@ pub async fn correct_single_entry(
         "preserve_case": preserve_case
     });
     
-    // 发送请求到服务
-    let output = Command::new("curl")
-        .args([
-            "-s",
-            "-X", "POST",
-            "-H", "Content-Type: application/json",
-            "-d", &request_body.to_string(),
-            "http://127.0.0.1:18765/"
-        ])
-        .output()
+    // 使用 reqwest 发送请求（比 curl 更快，无需启动新进程）
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(60))
+        .build()
+        .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
+    
+    let response = client
+        .post("http://127.0.0.1:18765/")
+        .header("Content-Type", "application/json")
+        .body(request_body.to_string())
+        .send()
+        .await
         .map_err(|e| format!("请求服务失败: {}", e))?;
     
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("校正失败: {}", stderr));
+    if !response.status().is_success() {
+        return Err(format!("校正失败: HTTP {}", response.status()));
     }
     
-    // 从 stdout 读取结果
-    let result_json = String::from_utf8_lossy(&output.stdout);
+    let result_json = response.text().await
+        .map_err(|e| format!("读取响应失败: {}", e))?;
     
     // 检查是否有错误
     if result_json.contains("\"error\"") {
