@@ -497,6 +497,18 @@ const handleRemovePunctuation = () => {
   subtitleStore.removePunctuationForEntry(currentEntry.value.id)
 }
 
+const handleToUpperCase = () => {
+  if (!currentEntry.value) return
+  if (audioStore.playerState.isPlaying) audioStore.pause()
+  subtitleStore.convertEntryToUpperCase(currentEntry.value.id)
+}
+
+const handleToLowerCase = () => {
+  if (!currentEntry.value) return
+  if (audioStore.playerState.isPlaying) audioStore.pause()
+  subtitleStore.convertEntryToLowerCase(currentEntry.value.id)
+}
+
 // 波形相关
 const handleWaveformSeek = (time: number) => {
   audioStore.seek(time)
@@ -1281,6 +1293,8 @@ onBeforeUnmount(() => {
           @remove-html="handleRemoveHTML"
           @add-cjk-spaces="handleAddCJKSpaces"
           @remove-punctuation="handleRemovePunctuation"
+          @to-uppercase="handleToUpperCase"
+          @to-lowercase="handleToLowerCase"
           @text-focus="handleTextFocus"
           @text-blur="handleTextBlur"
           @text-input="handleTextInput"

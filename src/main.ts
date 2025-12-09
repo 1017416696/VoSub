@@ -145,6 +145,42 @@ const globalBatchRemovePunctuation = async () => {
   }
 }
 
+// 全局批量转换为大写函数
+const globalBatchToUpperCase = async () => {
+  try {
+    const { useSubtitleStore } = await import('./stores/subtitle')
+    const store = useSubtitleStore()
+    if (store.entries.length === 0) {
+      return
+    }
+    store.convertToUpperCase()
+    logger.info('批量转换为大写', { entries: store.entries.length })
+    if (store.currentFilePath) {
+      await store.saveToFile()
+    }
+  } catch (error) {
+    logger.error('批量转换为大写失败', { error: String(error) })
+  }
+}
+
+// 全局批量转换为小写函数
+const globalBatchToLowerCase = async () => {
+  try {
+    const { useSubtitleStore } = await import('./stores/subtitle')
+    const store = useSubtitleStore()
+    if (store.entries.length === 0) {
+      return
+    }
+    store.convertToLowerCase()
+    logger.info('批量转换为小写', { entries: store.entries.length })
+    if (store.currentFilePath) {
+      await store.saveToFile()
+    }
+  } catch (error) {
+    logger.error('批量转换为小写失败', { error: String(error) })
+  }
+}
+
 // 全局清除最近文件函数
 const globalClearRecentFiles = async () => {
   try {
@@ -242,6 +278,8 @@ const updateRecentFilesMenu = async () => {
 ;(window as any).__globalBatchAddCJKSpaces = globalBatchAddCJKSpaces
 ;(window as any).__globalBatchRemoveHTML = globalBatchRemoveHTML
 ;(window as any).__globalBatchRemovePunctuation = globalBatchRemovePunctuation
+;(window as any).__globalBatchToUpperCase = globalBatchToUpperCase
+;(window as any).__globalBatchToLowerCase = globalBatchToLowerCase
 ;(window as any).__globalClearRecentFiles = globalClearRecentFiles
 ;(window as any).__globalOpenRecentFile = globalOpenRecentFile
 ;(window as any).__globalCloseCurrentTab = globalCloseCurrentTab

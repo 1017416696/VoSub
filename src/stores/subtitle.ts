@@ -798,6 +798,59 @@ export const useSubtitleStore = defineStore('subtitle', () => {
     })
   }
 
+  // 转换为大写
+  const convertToUpperCase = () => {
+    entries.value.forEach((entry) => {
+      entry.text = entry.text.toUpperCase()
+    })
+
+    addHistory({
+      type: HistoryActionType.BATCH,
+      timestamp: Date.now(),
+      entryId: -1,
+      before: {},
+      after: {},
+      description: '批量转换为大写',
+    })
+  }
+
+  // 转换为小写
+  const convertToLowerCase = () => {
+    entries.value.forEach((entry) => {
+      entry.text = entry.text.toLowerCase()
+    })
+
+    addHistory({
+      type: HistoryActionType.BATCH,
+      timestamp: Date.now(),
+      entryId: -1,
+      before: {},
+      after: {},
+      description: '批量转换为小写',
+    })
+  }
+
+  // 单条字幕转换为大写
+  const convertEntryToUpperCase = (entryId: number) => {
+    const entry = entries.value.find((e) => e.id === entryId)
+    if (!entry) return
+
+    const newText = entry.text.toUpperCase()
+    if (newText !== entry.text) {
+      updateEntryText(entryId, newText)
+    }
+  }
+
+  // 单条字幕转换为小写
+  const convertEntryToLowerCase = (entryId: number) => {
+    const entry = entries.value.find((e) => e.id === entryId)
+    if (!entry) return
+
+    const newText = entry.text.toLowerCase()
+    if (newText !== entry.text) {
+      updateEntryText(entryId, newText)
+    }
+  }
 
   // 添加历史记录
   const addHistory = (action: HistoryAction) => {
@@ -1228,6 +1281,10 @@ export const useSubtitleStore = defineStore('subtitle', () => {
     removeHTMLTags,
     addSpacesForEntry,
     addSpacesBetweenCJKAndAlphanumeric,
+    convertToUpperCase,
+    convertToLowerCase,
+    convertEntryToUpperCase,
+    convertEntryToLowerCase,
     detectTimeConflicts,
     assignSubtitleToTracks,
     undo,

@@ -21,6 +21,8 @@ const emit = defineEmits<{
   (e: 'remove-html'): void
   (e: 'add-cjk-spaces'): void
   (e: 'remove-punctuation'): void
+  (e: 'to-uppercase'): void
+  (e: 'to-lowercase'): void
   (e: 'text-focus'): void
   (e: 'text-blur'): void
   (e: 'text-input'): void
@@ -454,6 +456,23 @@ defineExpose({
             <line x1="9" y1="9" x2="15" y2="15"/>
           </svg>
           <span>删除标点</span>
+        </button>
+        <button class="quick-action-btn" @click="emit('to-uppercase')" title="转换为大写字母">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M3 18L9 6L15 18"/>
+            <path d="M5 14H13"/>
+            <path d="M18 18V10"/>
+            <path d="M15 13H21"/>
+          </svg>
+          <span>转大写</span>
+        </button>
+        <button class="quick-action-btn" @click="emit('to-lowercase')" title="转换为小写字母">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="9" cy="14" r="4"/>
+            <path d="M13 10V18"/>
+            <path d="M17 14H21"/>
+          </svg>
+          <span>转小写</span>
         </button>
         <button 
           class="quick-action-btn correct-btn" 
