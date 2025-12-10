@@ -60,9 +60,19 @@ const handleAdd = () => {
     ? variantText.split(/[,，]/).map(v => v.trim()).filter(v => v)
     : []
 
-  smartDictionary.addManual(newWordCorrect.value.trim(), variants)
+  const result = smartDictionary.addManual(newWordCorrect.value.trim(), variants)
 
-  ElMessage.success('添加成功')
+  if (result) {
+    if (result.merged) {
+      if (result.newVariants.length > 0) {
+        ElMessage.success(`已合并，新增 ${result.newVariants.length} 个变体`)
+      } else {
+        ElMessage.info('词条已存在')
+      }
+    } else {
+      ElMessage.success('添加成功')
+    }
+  }
   handleClose()
 }
 

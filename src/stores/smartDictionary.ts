@@ -20,20 +20,22 @@ export const useSmartDictionaryStore = defineStore('smartDictionary', () => {
   const totalCount = computed(() => entries.value.length)
 
   // ========== 添加词条 ==========
-  const addManual = (correct: string, variants: string[] = []) => {
+  const addManual = (correct: string, variants: string[] = []): { entry: DictionaryEntry; merged: boolean; newVariants: string[] } | null => {
     if (!correct.trim()) return null
 
     // 检查是否已存在
     const existing = entries.value.find(e => e.correct === correct)
     if (existing) {
-      // 合并变体
+      // 合并变体，记录新增的变体
+      const newVariants: string[] = []
       for (const v of variants) {
         if (v && !existing.variants.includes(v)) {
           existing.variants.push(v)
+          newVariants.push(v)
         }
       }
       save()
-      return existing
+      return { entry: existing, merged: true, newVariants }
     }
 
     const entry: DictionaryEntry = {
@@ -48,7 +50,7 @@ export const useSmartDictionaryStore = defineStore('smartDictionary', () => {
     entries.value.push(entry)
     save()
     logger.info('添加词典条目', { correct, variants })
-    return entry
+    return { entry, merged: false, newVariants: entry.variants }
   }
 
   // ========== 检查文本是否匹配词典（不执行替换） ==========
