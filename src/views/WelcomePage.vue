@@ -10,6 +10,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { useSubtitleStore } from '@/stores/subtitle'
 import { useAudioStore } from '@/stores/audio'
 import { useConfigStore } from '@/stores/config'
+import { useSmartDictionaryStore } from '@/stores/smartDictionary'
 import type { SRTFile, AudioFile, SubtitleEntry } from '@/types/subtitle'
 
 interface WhisperModelInfo {
@@ -35,6 +36,7 @@ const router = useRouter()
 const subtitleStore = useSubtitleStore()
 const audioStore = useAudioStore()
 const configStore = useConfigStore()
+const smartDictionary = useSmartDictionaryStore()
 
 const isDragging = ref(false)
 const isLoading = ref(false)
@@ -375,6 +377,21 @@ const startSensevoiceTranscription = async (audioPath: string) => {
 
 // 完成转录，跳转编辑器
 const finishTranscription = async (audioPath: string, entries: SubtitleEntry[]) => {
+  // 🔥 转录完成后，立即应用智能词典
+  if (smartDictionary.totalCount > 0) {
+    let replacementCount = 0
+    for (const entry of entries) {
+      const { result, replacements } = smartDictionary.applyDictionary(entry.text)
+      if (replacements.length > 0) {
+        entry.text = result
+        replacementCount += replacements.length
+      }
+    }
+    if (replacementCount > 0) {
+      console.log(`智能词典替换了 ${replacementCount} 处`)
+    }
+  }
+
   const fileName = audioPath.split('/').pop() || 'transcription.srt'
   const srtFileName = fileName.replace(/\.[^.]+$/, '.srt')
   // 生成与音频文件同目录的 srt 文件路径

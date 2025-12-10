@@ -2,7 +2,8 @@
 import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useConfigStore, DEFAULT_PUNCTUATION } from '@/stores/config'
-import { Setting, Key, InfoFilled, ChatDotRound, Message, Document, Microphone, FolderOpened } from '@element-plus/icons-vue'
+import { useSmartDictionaryStore } from '@/stores/smartDictionary'
+import { Setting, Key, InfoFilled, ChatDotRound, Message, Document, Microphone, FolderOpened, Collection } from '@element-plus/icons-vue'
 import { open } from '@tauri-apps/plugin-shell'
 import { invoke } from '@tauri-apps/api/core'
 import {
@@ -20,19 +21,112 @@ const emit = defineEmits<{
 }>()
 
 const configStore = useConfigStore()
+const smartDictionary = useSmartDictionaryStore()
 
 // 当前选中的菜单项
-const activeMenu = ref<'general' | 'whisper' | 'shortcuts' | 'logs' | 'contact' | 'about'>('general')
+const activeMenu = ref<'general' | 'whisper' | 'dictionary' | 'shortcuts' | 'logs' | 'contact' | 'about'>('general')
 
 // 菜单项配置
 const menuItems = [
   { key: 'general', label: '常规设置', icon: Setting },
   { key: 'whisper', label: '语音模型', icon: Microphone },
+  { key: 'dictionary', label: '智能词典', icon: Collection },
   { key: 'shortcuts', label: '快捷键列表', icon: Key },
   { key: 'logs', label: '日志', icon: Document },
   { key: 'contact', label: '联系开发者', icon: ChatDotRound },
   { key: 'about', label: '关于', icon: InfoFilled },
 ] as const
+
+// 词典相关
+const dictionaryFilter = ref<'all' | 'manual' | 'auto'>('all')
+const newWordCorrect = ref('')
+const newWordVariant = ref('')
+
+const filteredDictionaryEntries = computed(() => {
+  if (dictionaryFilter.value === 'manual') {
+    return smartDictionary.manualEntries
+  } else if (dictionaryFilter.value === 'auto') {
+    return smartDictionary.autoEntries
+  }
+  return smartDictionary.entries
+})
+
+const addNewWord = () => {
+  if (!newWordCorrect.value.trim()) {
+    ElMessage.warning('请输入正确写法')
+    return
+  }
+  // 支持用逗号分隔多个变体
+  const variantText = newWordVariant.value.trim()
+  const variants = variantText 
+    ? variantText.split(/[,，]/).map(v => v.trim()).filter(v => v)
+    : []
+  smartDictionary.addManual(newWordCorrect.value.trim(), variants)
+  newWordCorrect.value = ''
+  newWordVariant.value = ''
+  ElMessage.success('添加成功')
+}
+
+const removeWord = async (id: string) => {
+  try {
+    await ElMessageBox.confirm('确定要删除这个词条吗？', '删除确认', {
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+    smartDictionary.removeEntry(id)
+    ElMessage.success('已删除')
+  } catch {
+    // 取消
+  }
+}
+
+const clearAllWords = async () => {
+  try {
+    await ElMessageBox.confirm('确定要清空所有词条吗？此操作不可恢复。', '清空确认', {
+      confirmButtonText: '清空',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+    smartDictionary.clearAll()
+    ElMessage.success('已清空')
+  } catch {
+    // 取消
+  }
+}
+
+const exportDictionary = () => {
+  const json = smartDictionary.exportDictionary()
+  const blob = new Blob([json], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = 'smart-dictionary.json'
+  a.click()
+  URL.revokeObjectURL(url)
+  ElMessage.success('导出成功')
+}
+
+const importDictionary = async () => {
+  const input = document.createElement('input')
+  input.type = 'file'
+  input.accept = '.json'
+  input.onchange = async (e) => {
+    const file = (e.target as HTMLInputElement).files?.[0]
+    if (!file) return
+    try {
+      const text = await file.text()
+      if (smartDictionary.importDictionary(text)) {
+        ElMessage.success('导入成功')
+      } else {
+        ElMessage.error('导入失败，格式不正确')
+      }
+    } catch {
+      ElMessage.error('导入失败')
+    }
+  }
+  input.click()
+}
 
 // Whisper 模型相关
 interface WhisperModelInfo {
@@ -727,6 +821,108 @@ const shortcutCategories = computed(() => {
                   <div class="tip-item"><span class="tip-label">Whisper large/turbo</span><span class="tip-desc">高精度，专业场景</span></div>
                   <div class="tip-item"><span class="tip-label">SenseVoice</span><span class="tip-desc">中文识别优秀，首次使用需下载模型</span></div>
                   <div class="tip-item"><span class="tip-label">FireRedASR</span><span class="tip-desc">字幕校正专用，可对已有字幕进行二次校正</span></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 智能词典 -->
+            <div v-if="activeMenu === 'dictionary'" class="content-section">
+              <div class="section-header">
+                <h2 class="section-title">智能词典</h2>
+                <div class="section-actions">
+                  <el-button size="small" @click="importDictionary">导入</el-button>
+                  <el-button size="small" @click="exportDictionary">导出</el-button>
+                </div>
+              </div>
+              
+              <p class="section-desc">
+                添加常用术语和专有名词，转录和校正时自动替换。共 <strong>{{ smartDictionary.totalCount }}</strong> 个词条。
+              </p>
+
+              <!-- 添加新词 -->
+              <div class="dict-add-card">
+                <div class="dict-add-row">
+                  <div class="dict-input-group">
+                    <label class="dict-input-label">正确写法</label>
+                    <el-input 
+                      v-model="newWordCorrect" 
+                      placeholder="如：Kubernetes、ChatGPT"
+                      @keyup.enter="addNewWord"
+                    />
+                  </div>
+                  <div class="dict-input-group">
+                    <label class="dict-input-label">错误变体 <span class="optional">(可选)</span></label>
+                    <el-input 
+                      v-model="newWordVariant" 
+                      placeholder="如：酷伯内特斯、K8S"
+                      @keyup.enter="addNewWord"
+                    />
+                  </div>
+                  <el-button type="primary" class="dict-add-btn" @click="addNewWord">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <line x1="12" y1="5" x2="12" y2="19"></line>
+                      <line x1="5" y1="12" x2="19" y2="12"></line>
+                    </svg>
+                    添加
+                  </el-button>
+                </div>
+                <p class="dict-add-hint">
+                  💡 提示：错误变体是语音识别可能出现的错误写法，可以添加多个（用逗号分隔）
+                </p>
+              </div>
+
+              <!-- 词条列表 -->
+              <div class="dict-list-section">
+                <div class="dict-list-header">
+                  <span class="dict-list-title">词条列表</span>
+                  <el-button 
+                    v-if="smartDictionary.totalCount > 0"
+                    size="small" 
+                    text
+                    type="danger"
+                    @click="clearAllWords"
+                  >
+                    清空全部
+                  </el-button>
+                </div>
+                
+                <div class="dict-entries">
+                  <div 
+                    v-for="entry in smartDictionary.entries" 
+                    :key="entry.id" 
+                    class="dict-entry"
+                  >
+                    <div class="dict-entry-main">
+                      <span class="dict-entry-correct">{{ entry.correct }}</span>
+                      <div v-if="entry.variants.length > 0" class="dict-entry-variants">
+                        <span 
+                          v-for="(variant, idx) in entry.variants" 
+                          :key="idx" 
+                          class="variant-tag"
+                        >{{ variant }}</span>
+                      </div>
+                    </div>
+                    <div class="dict-entry-actions">
+                      <span v-if="entry.useCount > 0" class="dict-entry-count">
+                        已用 {{ entry.useCount }} 次
+                      </span>
+                      <button class="dict-entry-delete" @click="removeWord(entry.id)" title="删除">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                          <line x1="18" y1="6" x2="6" y2="18"></line>
+                          <line x1="6" y1="6" x2="18" y2="18"></line>
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+                  
+                  <div v-if="smartDictionary.totalCount === 0" class="dict-empty">
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+                      <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+                    </svg>
+                    <p>词典为空</p>
+                    <span>添加常用术语，提高识别准确率</span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1672,6 +1868,214 @@ const shortcutCategories = computed(() => {
 .option-desc {
   font-size: 12px;
   color: #9ca3af;
+}
+
+/* 词典相关样式 */
+.add-word-form {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 16px;
+  background: #f8fafc;
+  border-radius: 8px;
+}
+
+.filter-tabs {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.dictionary-list {
+  max-height: 400px;
+  overflow-y: auto;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+
+.dict-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid #f3f4f6;
+  transition: background 0.2s;
+}
+
+/* 词典添加卡片 */
+.dict-add-card {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 20px;
+}
+
+.dict-add-row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+}
+
+.dict-input-group {
+  flex: 1;
+}
+
+.dict-input-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: #374151;
+  margin-bottom: 6px;
+}
+
+.dict-input-label .optional {
+  font-weight: 400;
+  color: #9ca3af;
+}
+
+.dict-add-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  flex-shrink: 0;
+}
+
+.dict-add-hint {
+  margin: 12px 0 0;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+/* 词条列表 */
+.dict-list-section {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.dict-list-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.dict-list-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #374151;
+}
+
+.dict-entries {
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.dict-entry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid #f1f5f9;
+  transition: background 0.15s;
+}
+
+.dict-entry:last-child {
+  border-bottom: none;
+}
+
+.dict-entry:hover {
+  background: #f8fafc;
+}
+
+.dict-entry-main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+}
+
+.dict-entry-correct {
+  font-weight: 600;
+  color: #10b981;
+  font-size: 14px;
+}
+
+.dict-entry-variants {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.variant-tag {
+  font-size: 12px;
+  padding: 2px 8px;
+  background: #fef3c7;
+  color: #92400e;
+  border-radius: 4px;
+}
+
+.dict-entry-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.dict-entry-count {
+  font-size: 12px;
+  color: #9ca3af;
+}
+
+.dict-entry-delete {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  color: #9ca3af;
+  transition: all 0.15s;
+}
+
+.dict-entry-delete:hover {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+.dict-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 24px;
+  color: #9ca3af;
+}
+
+.dict-empty svg {
+  margin-bottom: 12px;
+  opacity: 0.5;
+}
+
+.dict-empty p {
+  margin: 0 0 4px;
+  font-size: 14px;
+  font-weight: 500;
+  color: #6b7280;
+}
+
+.dict-empty span {
+  font-size: 13px;
 }
 
 /* 提示卡片 */

@@ -8,6 +8,7 @@ import { useSubtitleStore } from '@/stores/subtitle'
 import { useAudioStore } from '@/stores/audio'
 import { useConfigStore } from '@/stores/config'
 import { useTabManagerStore } from '@/stores/tabManager'
+import { useSmartDictionaryStore } from '@/stores/smartDictionary'
 import { timeStampToMs } from '@/utils/time'
 import { findVoiceRegion, timestampToMs, msToTimestamp } from '@/utils/waveformAlign'
 import type { SRTFile, AudioFile, TimeStamp } from '@/types/subtitle'
@@ -15,6 +16,7 @@ import type { CorrectionEntry, CorrectionEntryWithChoice, FireRedEnvStatus } fro
 import WaveformViewer from '@/components/WaveformViewer.vue'
 import SettingsDialog from '@/components/SettingsDialog.vue'
 import CorrectionCompareDialog from '@/components/CorrectionCompareDialog.vue'
+import DictionaryPreviewDialog from '@/components/DictionaryPreviewDialog.vue'
 import TitleBar from '@/components/TitleBar.vue'
 import { EditorSidebar, AudioEmptyState, TimelineControls, SubtitleListPanel, SubtitleEditPanel } from '@/components/editor'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -24,6 +26,7 @@ const subtitleStore = useSubtitleStore()
 const audioStore = useAudioStore()
 const configStore = useConfigStore()
 const tabManager = useTabManagerStore()
+const smartDictionary = useSmartDictionaryStore()
 
 // UI 状态
 const searchText = ref('')
@@ -507,6 +510,78 @@ const handleRemoveHTML = () => {
   subtitleStore.removeHTMLTags()
 }
 
+// 🔥 批量应用智能词典（预览模式）
+interface DictionaryReplacement {
+  id: number
+  text: string
+  newText: string
+  replacements: Array<{ from: string; to: string }>
+}
+
+const showDictionaryDialog = ref(false)
+const dictionaryItems = ref<DictionaryReplacement[]>([])
+
+const handleApplyDictionary = async () => {
+  if (subtitleStore.entries.length === 0) {
+    ElMessage.warning('没有字幕内容')
+    return
+  }
+  
+  if (smartDictionary.totalCount === 0) {
+    ElMessage.warning('词典为空，请先添加词条或让系统自动学习')
+    return
+  }
+  
+  if (audioStore.playerState.isPlaying) audioStore.pause()
+  
+  // 预览词典替换结果（只收集有替换的）
+  const previewItems: DictionaryReplacement[] = []
+  for (const entry of subtitleStore.entries) {
+    const { result, replacements } = smartDictionary.applyDictionary(entry.text)
+    if (replacements.length > 0) {
+      previewItems.push({
+        id: entry.id,
+        text: entry.text,
+        newText: result,
+        replacements
+      })
+    }
+  }
+  
+  if (previewItems.length === 0) {
+    ElMessage.info('没有找到可替换的内容')
+    return
+  }
+  
+  // 显示预览对话框
+  dictionaryItems.value = previewItems
+  showDictionaryDialog.value = true
+}
+
+// 替换单条
+const handleDictionaryReplace = async (id: number, newText: string) => {
+  subtitleStore.updateEntryText(id, newText)
+  if (subtitleStore.currentFilePath) {
+    await subtitleStore.saveToFile()
+  }
+}
+
+// 全部替换
+const handleDictionaryReplaceAll = async (items: DictionaryReplacement[]) => {
+  for (const item of items) {
+    subtitleStore.updateEntryText(item.id, item.newText)
+  }
+  if (subtitleStore.currentFilePath) {
+    await subtitleStore.saveToFile()
+  }
+  ElMessage.success(`已替换 ${items.length} 条字幕`)
+}
+
+const handleDictionaryCancel = () => {
+  showDictionaryDialog.value = false
+  dictionaryItems.value = []
+}
+
 const handleAddCJKSpaces = () => {
   if (!currentEntry.value) return
   if (audioStore.playerState.isPlaying) audioStore.pause()
@@ -787,6 +862,21 @@ const startCorrection = async () => {
     console.log('Correction result:', result)
     
     if (result && result.length > 0) {
+      // 🔥 应用智能词典进行二次纠错
+      let dictionaryReplacements = 0
+      for (const entry of result) {
+        const { result: correctedText, replacements } = smartDictionary.applyDictionary(entry.corrected)
+        if (replacements.length > 0) {
+          entry.corrected = correctedText
+          entry.has_diff = entry.original !== correctedText
+          dictionaryReplacements += replacements.length
+          console.log('词典替换:', { id: entry.id, replacements })
+        }
+      }
+      if (dictionaryReplacements > 0) {
+        console.log(`智能词典共替换 ${dictionaryReplacements} 处`)
+      }
+
       // 将校正结果应用到字幕条目中，标记有差异的字幕
       let diffCount = 0
       for (const entry of result) {
@@ -1177,6 +1267,7 @@ onMounted(async () => {
     ;(window as any).__handleMenuOpenFile = async () => await handleOpenFile()
     ;(window as any).__handleMenuSave = async () => await handleSave()
     ;(window as any).__globalBatchAICorrection = async () => await startCorrection()
+    ;(window as any).__globalApplyDictionary = async () => await handleApplyDictionary()
     unlistenOpenFile = await listen<void>('menu:open-file', async () => await handleOpenFile())
     document.removeEventListener('keydown', handleKeydown, true)
     document.addEventListener('keydown', handleKeydown, true)
@@ -1192,6 +1283,7 @@ onBeforeUnmount(() => {
   ;(window as any).__handleMenuOpenFile = null
   ;(window as any).__handleMenuSave = null
   ;(window as any).__globalBatchAICorrection = null
+  ;(window as any).__globalApplyDictionary = null
   document.removeEventListener('keydown', handleKeydown, true)
   document.removeEventListener('keydown', handleAltKeyDown)
   document.removeEventListener('keyup', handleAltKeyUp)
@@ -1255,9 +1347,9 @@ onBeforeUnmount(() => {
         :show-search-panel="showSearchPanel"
         :can-merge="selectedSubtitleIds.length >= 2"
         :has-subtitles="hasContent"
-        :firered-ready="fireredStatus.ready"
         :show-only-needs-correction="showOnlyNeedsCorrection"
         :needs-correction-count="subtitleStore.needsCorrectionCount"
+        :dictionary-count="smartDictionary.totalCount"
         @add-subtitle="openSubtitle"
         @toggle-search="toggleSearchPanel"
         @toggle-scissor="handleScissor"
@@ -1265,8 +1357,8 @@ onBeforeUnmount(() => {
         @align-to-waveform="handleAlignToWaveform"
         @toggle-snap="isSnapEnabled = !isSnapEnabled"
         @open-settings="showSettingsDialog = true"
-        @start-correction="startCorrection"
         @toggle-correction-filter="showOnlyNeedsCorrection = !showOnlyNeedsCorrection"
+        @apply-dictionary="handleApplyDictionary"
       />
 
       <!-- 左侧字幕列表 -->
@@ -1342,6 +1434,15 @@ onBeforeUnmount(() => {
       :audio-path="audioStore.audioFile?.path"
       @confirm="handleCorrectionConfirm"
       @cancel="handleCorrectionCancel"
+    />
+
+    <!-- 词典替换预览弹窗 -->
+    <DictionaryPreviewDialog
+      v-model:visible="showDictionaryDialog"
+      :items="dictionaryItems"
+      @replace="handleDictionaryReplace"
+      @replace-all="handleDictionaryReplaceAll"
+      @cancel="handleDictionaryCancel"
     />
 
     <!-- 批量校正进度弹窗 -->

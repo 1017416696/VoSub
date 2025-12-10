@@ -12,6 +12,7 @@ const props = defineProps<{
   hasSubtitles: boolean
   showOnlyNeedsCorrection: boolean
   needsCorrectionCount: number
+  dictionaryCount: number
 }>()
 
 const emit = defineEmits<{
@@ -23,6 +24,7 @@ const emit = defineEmits<{
   (e: 'toggle-snap'): void
   (e: 'open-settings'): void
   (e: 'toggle-correction-filter'): void
+  (e: 'apply-dictionary'): void
 }>()
 </script>
 
@@ -98,6 +100,22 @@ const emit = defineEmits<{
           <path d="M2 12l10 5 10-5"/>
         </svg>
         <span v-if="needsCorrectionCount > 0" class="badge">{{ needsCorrectionCount > 99 ? '99+' : needsCorrectionCount }}</span>
+      </button>
+      <!-- 应用智能词典 -->
+      <button
+        class="sidebar-btn"
+        :class="{ 'has-badge': dictionaryCount > 0 }"
+        @click="emit('apply-dictionary')"
+        :disabled="!hasSubtitles || dictionaryCount === 0"
+        :title="`应用智能词典 (${dictionaryCount} 条)`"
+      >
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+          <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+          <path d="M8 7h8"/>
+          <path d="M8 11h6"/>
+        </svg>
+        <span v-if="dictionaryCount > 0" class="badge dict-badge">{{ dictionaryCount > 99 ? '99+' : dictionaryCount }}</span>
       </button>
     </div>
     <div class="sidebar-bottom">
@@ -246,5 +264,9 @@ const emit = defineEmits<{
 
 .sidebar-btn.active .badge {
   background: #3b82f6;
+}
+
+.sidebar-btn .badge.dict-badge {
+  background: #10b981;
 }
 </style>
