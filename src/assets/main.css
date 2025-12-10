@@ -77,3 +77,233 @@ input {
 input, textarea {
   @apply select-auto;
 }
+
+
+/* FPS 选择对话框样式 */
+.fps-dialog-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.fps-dialog-backdrop {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.fps-dialog-content {
+  position: relative;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15);
+  width: 360px;
+  max-width: 90vw;
+  animation: fps-dialog-in 0.2s ease-out;
+}
+
+@keyframes fps-dialog-in {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.fps-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.fps-dialog-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #303133;
+}
+
+.fps-dialog-close {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  font-size: 20px;
+  color: #909399;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+.fps-dialog-close:hover {
+  background: #f5f5f5;
+  color: #606266;
+}
+
+.fps-dialog-body {
+  padding: 20px;
+}
+
+.fps-dialog-body .fps-hint {
+  font-size: 14px;
+  color: #606266;
+  margin-bottom: 16px;
+  padding: 0;
+}
+
+.fps-dialog-body .fps-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.fps-dialog-body .fps-option {
+  display: flex;
+  align-items: center;
+  padding: 12px 16px;
+  border: 1px solid #e4e7ed;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background: #fff;
+}
+
+.fps-dialog-body .fps-option:hover {
+  border-color: #c0c4cc;
+  background: #f5f7fa;
+}
+
+.fps-dialog-body .fps-option.selected {
+  border-color: #409eff;
+  background: #ecf5ff;
+}
+
+.fps-dialog-body .fps-option-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.fps-dialog-body .fps-label {
+  font-size: 14px;
+  font-weight: 500;
+  color: #303133;
+}
+
+.fps-dialog-body .fps-option.selected .fps-label {
+  color: #409eff;
+}
+
+.fps-dialog-body .fps-desc {
+  font-size: 12px;
+  color: #909399;
+}
+
+.fps-dialog-body .fps-check {
+  color: #409eff;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.fps-dialog-body .fps-option.selected .fps-check {
+  opacity: 1;
+}
+
+.fps-position-section {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #f0f0f0;
+}
+
+.fps-position-inputs {
+  display: flex;
+  gap: 16px;
+}
+
+.fps-position-input {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fps-position-input label {
+  font-size: 14px;
+  font-weight: 500;
+  color: #606266;
+  min-width: 20px;
+}
+
+.fps-position-input input {
+  width: 80px;
+  padding: 6px 10px;
+  border: 1px solid #dcdfe6;
+  border-radius: 6px;
+  font-size: 14px;
+  color: #303133;
+  background: #fff;
+  margin: 0;
+}
+
+.fps-position-input input:focus {
+  outline: none;
+  border-color: #409eff;
+}
+
+.fps-position-input span {
+  font-size: 12px;
+  color: #909399;
+}
+
+.fps-dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 20px;
+  border-top: 1px solid #f0f0f0;
+}
+
+.fps-btn {
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: none;
+}
+
+.fps-btn-cancel {
+  background: #f5f5f5;
+  color: #606266;
+}
+
+.fps-btn-cancel:hover {
+  background: #e8e8e8;
+}
+
+.fps-btn-confirm {
+  background: #409eff;
+  color: #fff;
+}
+
+.fps-btn-confirm:hover {
+  background: #66b1ff;
+}

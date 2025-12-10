@@ -218,6 +218,199 @@ const globalCloseCurrentTab = async () => {
   }
 }
 
+// 全局导出字幕函数
+const globalExportSubtitles = async (format: string) => {
+  try {
+    const { useSubtitleStore } = await import('./stores/subtitle')
+    const { save } = await import('@tauri-apps/plugin-dialog')
+    const { ElMessage, ElMessageBox } = await import('element-plus')
+    const store = useSubtitleStore()
+    
+    if (store.entries.length === 0) {
+      ElMessage.warning('没有字幕内容可导出')
+      return
+    }
+    
+    // 准备导出数据（转换为后端需要的格式，使用 camelCase 匹配 Rust serde rename）
+    const entries = store.entries.map(e => ({
+      id: e.id,
+      startTime: {
+        hours: e.startTime.hours,
+        minutes: e.startTime.minutes,
+        seconds: e.startTime.seconds,
+        milliseconds: e.startTime.milliseconds,
+      },
+      endTime: {
+        hours: e.endTime.hours,
+        minutes: e.endTime.minutes,
+        seconds: e.endTime.seconds,
+        milliseconds: e.endTime.milliseconds,
+      },
+      text: e.text,
+    }))
+    
+    // 根据格式设置文件扩展名和过滤器
+    const formatConfig: Record<string, { ext: string; name: string }> = {
+      txt: { ext: 'txt', name: '纯文本文件' },
+      vtt: { ext: 'vtt', name: 'WebVTT 字幕文件' },
+      srt: { ext: 'srt', name: 'SRT 字幕文件' },
+      markdown: { ext: 'md', name: 'Markdown 文件' },
+      fcpxml: { ext: 'fcpxml', name: 'Final Cut Pro XML' },
+    }
+    
+    const config = formatConfig[format]
+    if (!config) {
+      ElMessage.error('不支持的导出格式')
+      return
+    }
+    
+    // FCPXML 需要选择帧率和字幕位置
+    let fps = 25.0
+    let positionX = 0
+    let positionY = -415
+    if (format === 'fcpxml') {
+      const fpsOptions = [
+        { value: 24, label: '24 fps', desc: '电影标准' },
+        { value: 25, label: '25 fps', desc: 'PAL 制式' },
+        { value: 30, label: '30 fps', desc: 'NTSC 制式' },
+        { value: 60, label: '60 fps', desc: '高帧率' },
+      ]
+      
+      // 创建一个 Promise 来处理用户选择
+      const result = await new Promise<{ fps: number; posX: number; posY: number } | null>((resolve) => {
+        // 创建对话框容器
+        const container = document.createElement('div')
+        container.className = 'fps-dialog-overlay'
+        container.innerHTML = `
+          <div class="fps-dialog-backdrop"></div>
+          <div class="fps-dialog-content">
+            <div class="fps-dialog-header">
+              <span class="fps-dialog-title">导出 FCPXML</span>
+              <button class="fps-dialog-close" type="button">×</button>
+            </div>
+            <div class="fps-dialog-body">
+              <p class="fps-hint">请选择视频帧率：</p>
+              <div class="fps-options">
+                ${fpsOptions.map(opt => `
+                  <label class="fps-option${opt.value === 25 ? ' selected' : ''}" data-value="${opt.value}">
+                    <div class="fps-option-content">
+                      <span class="fps-label">${opt.label}</span>
+                      <span class="fps-desc">${opt.desc}</span>
+                    </div>
+                    <svg class="fps-check" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                      <polyline points="20 6 9 17 4 12"/>
+                    </svg>
+                  </label>
+                `).join('')}
+              </div>
+              <div class="fps-position-section">
+                <p class="fps-hint">字幕位置：</p>
+                <div class="fps-position-inputs">
+                  <div class="fps-position-input">
+                    <label>X</label>
+                    <input type="number" id="fcpxml-pos-x" value="0" />
+                    <span>px</span>
+                  </div>
+                  <div class="fps-position-input">
+                    <label>Y</label>
+                    <input type="number" id="fcpxml-pos-y" value="-415" />
+                    <span>px</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="fps-dialog-footer">
+              <button class="fps-btn fps-btn-cancel" type="button">取消</button>
+              <button class="fps-btn fps-btn-confirm" type="button">导出</button>
+            </div>
+          </div>
+        `
+        document.body.appendChild(container)
+        
+        let currentFps = 25
+        
+        // 绑定选项点击事件
+        container.querySelectorAll('.fps-option').forEach(option => {
+          option.addEventListener('click', () => {
+            container.querySelectorAll('.fps-option').forEach(o => o.classList.remove('selected'))
+            option.classList.add('selected')
+            currentFps = parseInt(option.getAttribute('data-value') || '25')
+          })
+        })
+        
+        const getPositionValues = () => {
+          const posXInput = container.querySelector('#fcpxml-pos-x') as HTMLInputElement
+          const posYInput = container.querySelector('#fcpxml-pos-y') as HTMLInputElement
+          return {
+            posX: parseInt(posXInput?.value || '0'),
+            posY: parseInt(posYInput?.value || '-415'),
+          }
+        }
+        
+        // 绑定按钮事件
+        container.querySelector('.fps-btn-cancel')?.addEventListener('click', () => {
+          document.body.removeChild(container)
+          resolve(null)
+        })
+        
+        container.querySelector('.fps-dialog-close')?.addEventListener('click', () => {
+          document.body.removeChild(container)
+          resolve(null)
+        })
+        
+        container.querySelector('.fps-btn-confirm')?.addEventListener('click', () => {
+          const { posX, posY } = getPositionValues()
+          document.body.removeChild(container)
+          resolve({ fps: currentFps, posX, posY })
+        })
+        
+        container.querySelector('.fps-dialog-backdrop')?.addEventListener('click', () => {
+          document.body.removeChild(container)
+          resolve(null)
+        })
+      })
+      
+      if (result === null) {
+        return // 用户取消
+      }
+      fps = result.fps
+      positionX = result.posX
+      positionY = result.posY
+    }
+    
+    // 获取默认文件名
+    const currentFileName = store.currentFilePath?.split('/').pop()?.replace('.srt', '') || 'subtitles'
+    
+    // 打开保存对话框
+    const filePath = await save({
+      filters: [{ name: config.name, extensions: [config.ext] }],
+      defaultPath: `${currentFileName}.${config.ext}`,
+    })
+    
+    if (!filePath) return
+    
+    // 调用对应的导出命令
+    if (format === 'fcpxml') {
+      await invoke('export_fcpxml', { filePath, entries, fps, positionX, positionY })
+    } else if (format === 'txt') {
+      await invoke('export_txt', { filePath, entries })
+    } else if (format === 'vtt') {
+      await invoke('export_vtt', { filePath, entries })
+    } else if (format === 'srt') {
+      await invoke('write_srt', { filePath, entries })
+    } else if (format === 'markdown') {
+      await invoke('export_markdown', { filePath, entries })
+    }
+    
+    ElMessage.success(`已导出为 ${config.ext.toUpperCase()} 格式`)
+    logger.info('导出字幕', { format, path: filePath, entries: entries.length })
+  } catch (error) {
+    const { ElMessage } = await import('element-plus')
+    ElMessage.error(`导出失败：${error instanceof Error ? error.message : String(error)}`)
+    logger.error('导出字幕失败', { format, error: String(error) })
+  }
+}
+
 // 全局打开最近文件函数
 const globalOpenRecentFile = async (index: number) => {
   try {
@@ -283,6 +476,7 @@ const updateRecentFilesMenu = async () => {
 ;(window as any).__globalClearRecentFiles = globalClearRecentFiles
 ;(window as any).__globalOpenRecentFile = globalOpenRecentFile
 ;(window as any).__globalCloseCurrentTab = globalCloseCurrentTab
+;(window as any).__globalExportSubtitles = globalExportSubtitles
 ;(window as any).__updateRecentFilesMenu = updateRecentFilesMenu
 
 // 全局菜单事件监听器（在应用启动时注册）

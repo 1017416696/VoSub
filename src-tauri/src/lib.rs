@@ -4,7 +4,10 @@ mod whisper_transcriber;
 mod sensevoice_transcriber;
 mod firered_corrector;
 
-use srt_parser::{read_srt_file, write_srt_file, SRTFile, SubtitleEntry};
+use srt_parser::{
+    read_srt_file, write_srt_file, SRTFile, SubtitleEntry,
+    export_to_txt, export_to_vtt, export_to_markdown, export_to_fcpxml,
+};
 use whisper_transcriber::{
     get_available_models, download_model, delete_model, transcribe_audio, cancel_transcription, WhisperModelInfo,
 };
@@ -318,6 +321,44 @@ fn open_whisper_model_dir() -> Result<(), String> {
     Ok(())
 }
 
+// ============ 导出功能 ============
+
+/// 导出为 TXT 格式（纯文本）
+#[tauri::command]
+fn export_txt(file_path: String, entries: Vec<SubtitleEntry>) -> Result<(), String> {
+    export_to_txt(&file_path, &entries)
+}
+
+/// 导出为 VTT 格式（WebVTT）
+#[tauri::command]
+fn export_vtt(file_path: String, entries: Vec<SubtitleEntry>) -> Result<(), String> {
+    export_to_vtt(&file_path, &entries)
+}
+
+/// 导出为 Markdown 格式
+#[tauri::command]
+fn export_markdown(file_path: String, entries: Vec<SubtitleEntry>) -> Result<(), String> {
+    export_to_markdown(&file_path, &entries)
+}
+
+/// 导出为 FCPXML 格式（Final Cut Pro）
+#[tauri::command]
+fn export_fcpxml(
+    file_path: String,
+    entries: Vec<SubtitleEntry>,
+    fps: f64,
+    position_x: Option<i32>,
+    position_y: Option<i32>,
+) -> Result<(), String> {
+    export_to_fcpxml(
+        &file_path,
+        &entries,
+        fps,
+        position_x.unwrap_or(0),
+        position_y.unwrap_or(-415),
+    )
+}
+
 /// 最近文件信息
 #[derive(serde::Deserialize, Clone)]
 #[allow(dead_code)]
@@ -363,6 +404,17 @@ fn update_recent_files_menu(app_handle: tauri::AppHandle, files: Vec<RecentFileI
                 .build()
                 .map_err(|e| e.to_string())?;
 
+            // 创建导出子菜单
+            let export_menu = SubmenuBuilder::new(&app_handle, "导出")
+                .text("export-txt", "导出为 TXT")
+                .text("export-vtt", "导出为 VTT")
+                .text("export-srt", "导出为 SRT")
+                .text("export-markdown", "导出为 Markdown")
+                .separator()
+                .text("export-fcpxml", "导出为 FCPXML...")
+                .build()
+                .map_err(|e| e.to_string())?;
+
             let open_item = MenuItem::with_id(&app_handle, "open", "打开", true, Some("CmdOrCtrl+O")).map_err(|e| e.to_string())?;
             let save_item = MenuItem::with_id(&app_handle, "save", "保存", true, Some("CmdOrCtrl+S")).map_err(|e| e.to_string())?;
             let close_tab_item = MenuItem::with_id(&app_handle, "close-tab", "关闭标签页", true, Some("CmdOrCtrl+W")).map_err(|e| e.to_string())?;
@@ -372,6 +424,7 @@ fn update_recent_files_menu(app_handle: tauri::AppHandle, files: Vec<RecentFileI
                 .item(&open_item)
                 .item(&recent_menu)
                 .item(&save_item)
+                .item(&export_menu)
                 .separator()
                 .item(&close_tab_item)
                 .item(&close_window_item)
@@ -414,6 +467,17 @@ fn update_recent_files_menu(app_handle: tauri::AppHandle, files: Vec<RecentFileI
         {
             use tauri::menu::{MenuItem, PredefinedMenuItem};
             
+            // 创建导出子菜单
+            let export_menu = SubmenuBuilder::new(&app_handle, "导出")
+                .text("export-txt", "导出为 TXT")
+                .text("export-vtt", "导出为 VTT")
+                .text("export-srt", "导出为 SRT")
+                .text("export-markdown", "导出为 Markdown")
+                .separator()
+                .text("export-fcpxml", "导出为 FCPXML...")
+                .build()
+                .map_err(|e| e.to_string())?;
+
             let open_item = MenuItem::with_id(&app_handle, "open", "打开", true, Some("CmdOrCtrl+O")).map_err(|e| e.to_string())?;
             let save_item = MenuItem::with_id(&app_handle, "save", "保存", true, Some("CmdOrCtrl+S")).map_err(|e| e.to_string())?;
             let close_tab_item = MenuItem::with_id(&app_handle, "close-tab", "关闭标签页", true, Some("CmdOrCtrl+W")).map_err(|e| e.to_string())?;
@@ -423,6 +487,7 @@ fn update_recent_files_menu(app_handle: tauri::AppHandle, files: Vec<RecentFileI
                 .item(&open_item)
                 .item(&recent_menu)
                 .item(&save_item)
+                .item(&export_menu)
                 .separator()
                 .item(&close_tab_item)
                 .item(&close_window_item)
@@ -516,6 +581,16 @@ pub fn run() {
                     .text("clear-recent", "清除最近文件")
                     .build()?;
 
+                // 创建 导出 子菜单
+                let export_menu = SubmenuBuilder::new(app, "导出")
+                    .text("export-txt", "导出为 TXT")
+                    .text("export-vtt", "导出为 VTT")
+                    .text("export-srt", "导出为 SRT")
+                    .text("export-markdown", "导出为 Markdown")
+                    .separator()
+                    .text("export-fcpxml", "导出为 FCPXML...")
+                    .build()?;
+
                 // 创建 文件 菜单（macOS 使用 Cmd）
                 let open_item = MenuItem::with_id(app, "open", "打开", true, Some("CmdOrCtrl+O"))?;
                 let save_item = MenuItem::with_id(app, "save", "保存", true, Some("CmdOrCtrl+S"))?;
@@ -526,6 +601,7 @@ pub fn run() {
                     .item(&open_item)
                     .item(&recent_menu)
                     .item(&save_item)
+                    .item(&export_menu)
                     .separator()
                     .item(&close_tab_item)
                     .item(&close_window_item)
@@ -573,6 +649,16 @@ pub fn run() {
                     .text("clear-recent", "清除最近文件")
                     .build()?;
 
+                // 创建 导出 子菜单
+                let export_menu = SubmenuBuilder::new(app, "导出")
+                    .text("export-txt", "导出为 TXT")
+                    .text("export-vtt", "导出为 VTT")
+                    .text("export-srt", "导出为 SRT")
+                    .text("export-markdown", "导出为 Markdown")
+                    .separator()
+                    .text("export-fcpxml", "导出为 FCPXML...")
+                    .build()?;
+
                 // 创建 文件 菜单（Windows 使用 Ctrl）
                 let open_item = MenuItem::with_id(app, "open", "打开", true, Some("CmdOrCtrl+O"))?;
                 let save_item = MenuItem::with_id(app, "save", "保存", true, Some("CmdOrCtrl+S"))?;
@@ -583,6 +669,7 @@ pub fn run() {
                     .item(&open_item)
                     .item(&recent_menu)
                     .item(&save_item)
+                    .item(&export_menu)
                     .separator()
                     .item(&close_tab_item)
                     .item(&close_window_item)
@@ -775,6 +862,20 @@ pub fn run() {
                             let _ = window.eval(&js_code);
                         }
                     }
+                    // 导出功能
+                    id if id.starts_with("export-") => {
+                        if let Some(window) = app_handle.get_webview_window("main") {
+                            let format = id.strip_prefix("export-").unwrap_or("txt");
+                            let js_code = format!(r#"
+                                (async () => {{
+                                    if (window.__globalExportSubtitles && typeof window.__globalExportSubtitles === 'function') {{
+                                        await window.__globalExportSubtitles('{}');
+                                    }}
+                                }})();
+                            "#, format);
+                            let _ = window.eval(&js_code);
+                        }
+                    }
                     _ => {}
                 }
             });
@@ -857,7 +958,12 @@ pub fn run() {
             is_firered_service_running,
             preload_audio_for_firered,
             uninstall_firered,
-            cancel_firered_task
+            cancel_firered_task,
+            // 导出功能
+            export_txt,
+            export_vtt,
+            export_markdown,
+            export_fcpxml
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

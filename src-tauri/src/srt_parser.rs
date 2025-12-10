@@ -172,6 +172,201 @@ pub fn write_srt_file(file_path: &str, entries: &[SubtitleEntry]) -> Result<(), 
     Ok(())
 }
 
+// ============ 导出功能 ============
+
+impl TimeStamp {
+    /// Convert to VTT format: HH:MM:SS.mmm
+    pub fn to_vtt_string(&self) -> String {
+        format!(
+            "{:02}:{:02}:{:02}.{:03}",
+            self.hours, self.minutes, self.seconds, self.milliseconds
+        )
+    }
+
+    /// Convert to simple format for Markdown: HH:MM:SS
+    pub fn to_simple_string(&self) -> String {
+        format!(
+            "{:02}:{:02}:{:02}",
+            self.hours, self.minutes, self.seconds
+        )
+    }
+
+    /// Convert to total milliseconds
+    pub fn to_ms(&self) -> u64 {
+        (self.hours as u64 * 3600 + self.minutes as u64 * 60 + self.seconds as u64) * 1000
+            + self.milliseconds as u64
+    }
+
+    /// Convert to frames at given frame rate
+    pub fn to_frames(&self, fps: f64) -> u64 {
+        let total_seconds = self.hours as f64 * 3600.0
+            + self.minutes as f64 * 60.0
+            + self.seconds as f64
+            + self.milliseconds as f64 / 1000.0;
+        (total_seconds * fps).round() as u64
+    }
+}
+
+/// Export to TXT (plain text, subtitles only)
+pub fn export_to_txt(file_path: &str, entries: &[SubtitleEntry]) -> Result<(), String> {
+    let content: String = entries
+        .iter()
+        .map(|e| e.text.clone())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    fs::write(file_path, content)
+        .map_err(|e| format!("Failed to write TXT file: {}", e))?;
+
+    println!("Successfully exported {} subtitles to TXT: {}", entries.len(), file_path);
+    Ok(())
+}
+
+/// Export to VTT (WebVTT format)
+pub fn export_to_vtt(file_path: &str, entries: &[SubtitleEntry]) -> Result<(), String> {
+    let mut content = String::from("WEBVTT\n\n");
+
+    for (index, entry) in entries.iter().enumerate() {
+        // Cue identifier (optional but useful)
+        content.push_str(&format!("{}\n", index + 1));
+
+        // Timestamp line (VTT uses . instead of ,)
+        content.push_str(&format!(
+            "{} --> {}\n",
+            entry.start_time.to_vtt_string(),
+            entry.end_time.to_vtt_string()
+        ));
+
+        // Subtitle text
+        content.push_str(&entry.text);
+
+        // Blank line between cues
+        if index < entries.len() - 1 {
+            content.push_str("\n\n");
+        }
+    }
+
+    fs::write(file_path, content)
+        .map_err(|e| format!("Failed to write VTT file: {}", e))?;
+
+    println!("Successfully exported {} subtitles to VTT: {}", entries.len(), file_path);
+    Ok(())
+}
+
+/// Export to Markdown
+pub fn export_to_markdown(file_path: &str, entries: &[SubtitleEntry]) -> Result<(), String> {
+    let mut content = String::from("# 视频脚本\n\n");
+
+    for entry in entries {
+        content.push_str(&format!(
+            "**[{} - {}]** {}\n\n",
+            entry.start_time.to_simple_string(),
+            entry.end_time.to_simple_string(),
+            entry.text.replace('\n', " ")
+        ));
+    }
+
+    fs::write(file_path, content.trim_end())
+        .map_err(|e| format!("Failed to write Markdown file: {}", e))?;
+
+    println!("Successfully exported {} subtitles to Markdown: {}", entries.len(), file_path);
+    Ok(())
+}
+
+/// Export to FCPXML (Final Cut Pro XML)
+/// fps: frame rate (e.g., 24.0, 25.0, 29.97, 30.0, 60.0)
+/// position_x: subtitle X position (default: 0)
+/// position_y: subtitle Y position (default: -415)
+pub fn export_to_fcpxml(
+    file_path: &str,
+    entries: &[SubtitleEntry],
+    fps: f64,
+    position_x: i32,
+    position_y: i32,
+) -> Result<(), String> {
+    // Calculate frame duration and format name based on fps
+    let (frame_duration, format_name) = match fps as u32 {
+        24 => ("100/2400s", "FFVideoFormat1080p24"),
+        25 => ("100/2500s", "FFVideoFormat1080p25"),
+        30 => ("100/3000s", "FFVideoFormat1080p30"),
+        60 => ("100/6000s", "FFVideoFormat1080p60"),
+        _ => ("100/2500s", "FFVideoFormat1080p25"), // Default to 25fps
+    };
+
+    // Find total duration from last subtitle (in the same time base)
+    let total_duration = entries
+        .last()
+        .map(|e| e.end_time.to_frames(fps) * 100)
+        .unwrap_or(0);
+    
+    let time_base = (fps * 100.0) as u64;
+
+    let mut content = format!(r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE fcpxml>
+
+<fcpxml version="1.8">
+  <resources>
+    <format id="r1" name="{}" frameDuration="{}" width="1920" height="1080" colorSpace="1-1-1 (Rec. 709)"/>
+    <effect id="r2" name="Basic Title" uid=".../Titles.localized/Bumper:Opener.localized/Basic Title.localized/Basic Title.moti"/>
+  </resources>
+  <library>
+    <event name="Subtitles">
+      <project name="Subtitles">
+        <sequence duration="{}/{}s" format="r1" tcStart="0s" tcFormat="NDF" audioLayout="stereo" audioRate="48k">
+          <spine>
+"#, format_name, frame_duration, total_duration + 10000, time_base);
+
+    for (index, entry) in entries.iter().enumerate() {
+        // Convert time to the same time base (fps * 100)
+        let start_units = entry.start_time.to_frames(fps) * 100;
+        let end_units = entry.end_time.to_frames(fps) * 100;
+        let duration_units = end_units - start_units;
+
+        // Escape XML special characters
+        let escaped_text = entry.text
+            .replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+            .replace('"', "&quot;")
+            .replace('\'', "&apos;")
+            .replace('\n', " ");
+
+        content.push_str(&format!(
+            r#"            <title ref="r2" name="{} - 自定" lane="1" offset="{}/{}s" duration="{}/{}s">
+              <param name="位置" key="9999/10199/10201/1/100/101" value="{} {}"/>
+              <param name="对齐" key="9999/10199/10201/2/354/1002961760/401" value="1 (居中)"/>
+              <text>
+                <text-style ref="ts{}">{}</text-style>
+              </text>
+              <text-style-def id="ts{}">
+                <text-style font="PingFang SC" fontSize="62" fontFace="Semibold" fontColor="1 1 1 1" bold="1" alignment="center"/>
+              </text-style-def>
+            </title>
+"#,
+            escaped_text.chars().take(20).collect::<String>(),
+            start_units, time_base,
+            duration_units, time_base,
+            position_x, position_y,
+            index + 1,
+            escaped_text,
+            index + 1
+        ));
+    }
+
+    content.push_str(r#"          </spine>
+        </sequence>
+      </project>
+    </event>
+  </library>
+</fcpxml>"#);
+
+    fs::write(file_path, content)
+        .map_err(|e| format!("Failed to write FCPXML file: {}", e))?;
+
+    println!("Successfully exported {} subtitles to FCPXML ({}fps): {}", entries.len(), fps, file_path);
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
