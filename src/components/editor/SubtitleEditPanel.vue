@@ -32,6 +32,7 @@ const emit = defineEmits<{
   (e: 'toggle-correction-mark'): void
   (e: 'apply-suggestion', text?: string): void
   (e: 'dismiss-suggestion'): void
+  (e: 'quick-add-dictionary', selectedText: string): void
 }>()
 
 const editingText = ref('')
@@ -197,10 +198,26 @@ function handleApplySuggestion() {
   emit('apply-suggestion', editingText.value)
 }
 
+// 获取输入框中选中的文本
+function getSelectedText(): string {
+  const inputEl = textareaInputRef.value?.$el?.querySelector('input') as HTMLInputElement | null
+  if (inputEl && inputEl.selectionStart !== inputEl.selectionEnd) {
+    return inputEl.value.substring(inputEl.selectionStart ?? 0, inputEl.selectionEnd ?? 0)
+  }
+  return ''
+}
+
+// 快速添加词典
+function handleQuickAddDictionary() {
+  const selectedText = getSelectedText()
+  emit('quick-add-dictionary', selectedText)
+}
+
 // 暴露给父组件
 defineExpose({
   focusTextarea,
-  getTextareaRef: () => textareaInputRef.value
+  getTextareaRef: () => textareaInputRef.value,
+  getSelectedText
 })
 </script>
 
@@ -433,61 +450,77 @@ defineExpose({
 
     <!-- 快捷操作 -->
     <div class="quick-actions">
-      <span class="actions-label">快捷操作</span>
-      <div class="actions-group">
-        <button class="quick-action-btn" @click="emit('remove-html')" title="移除HTML标签">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <polyline points="4,7 4,4 20,4 20,7"/>
-            <line x1="9" y1="20" x2="15" y2="20"/>
-            <line x1="12" y1="4" x2="12" y2="20"/>
-          </svg>
-          <span>移除标签</span>
-        </button>
-        <button class="quick-action-btn" @click="emit('add-cjk-spaces')" title="中英文之间添加空格">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M21 6H3M21 12H3M21 18H3"/>
-          </svg>
-          <span>添加空格</span>
-        </button>
-        <button class="quick-action-btn" @click="emit('remove-punctuation')" title="删除标点符号">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="12" cy="12" r="10"/>
-            <line x1="15" y1="9" x2="9" y2="15"/>
-            <line x1="9" y1="9" x2="15" y2="15"/>
-          </svg>
-          <span>删除标点</span>
-        </button>
-        <button class="quick-action-btn" @click="emit('to-uppercase')" title="转换为大写字母">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M3 18L9 6L15 18"/>
-            <path d="M5 14H13"/>
-            <path d="M18 18V10"/>
-            <path d="M15 13H21"/>
-          </svg>
-          <span>转大写</span>
-        </button>
-        <button class="quick-action-btn" @click="emit('to-lowercase')" title="转换为小写字母">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="9" cy="14" r="4"/>
-            <path d="M13 10V18"/>
-            <path d="M17 14H21"/>
-          </svg>
-          <span>转小写</span>
-        </button>
-        <button 
-          class="quick-action-btn correct-btn" 
-          :class="{ loading: isCorrecting }"
-          :disabled="!fireredReady || isCorrecting"
-          @click="emit('correct-entry')" 
-          :title="fireredReady ? '使用 FireRedASR 校正此条字幕' : '请先在设置中安装 FireRedASR'"
-        >
-          <svg v-if="!isCorrecting" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-          </svg>
-          <span v-if="isCorrecting" class="loading-spinner"></span>
-          <span>{{ isCorrecting ? '校正中...' : 'AI校正' }}</span>
-        </button>
+      <div class="actions-row">
+        <span class="actions-label">文本处理</span>
+        <div class="actions-group">
+          <button class="quick-action-btn" @click="emit('remove-html')" title="移除HTML标签">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="4,7 4,4 20,4 20,7"/>
+              <line x1="9" y1="20" x2="15" y2="20"/>
+              <line x1="12" y1="4" x2="12" y2="20"/>
+            </svg>
+            <span>移除标签</span>
+          </button>
+          <button class="quick-action-btn" @click="emit('add-cjk-spaces')" title="中英文之间添加空格">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 6H3M21 12H3M21 18H3"/>
+            </svg>
+            <span>添加空格</span>
+          </button>
+          <button class="quick-action-btn" @click="emit('remove-punctuation')" title="删除标点符号">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/>
+              <line x1="15" y1="9" x2="9" y2="15"/>
+              <line x1="9" y1="9" x2="15" y2="15"/>
+            </svg>
+            <span>删除标点</span>
+          </button>
+          <button class="quick-action-btn" @click="emit('to-uppercase')" title="转换为大写字母">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M3 18L9 6L15 18"/>
+              <path d="M5 14H13"/>
+              <path d="M18 18V10"/>
+              <path d="M15 13H21"/>
+            </svg>
+            <span>转大写</span>
+          </button>
+          <button class="quick-action-btn" @click="emit('to-lowercase')" title="转换为小写字母">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="9" cy="14" r="4"/>
+              <path d="M13 10V18"/>
+              <path d="M17 14H21"/>
+            </svg>
+            <span>转小写</span>
+          </button>
+        </div>
+      </div>
+      <div class="actions-row">
+        <span class="actions-label">智能工具</span>
+        <div class="actions-group">
+          <button class="quick-action-btn add-dict-btn" @click="handleQuickAddDictionary" title="快速添加到本地词典 (Cmd/Ctrl+D)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+              <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+              <line x1="12" y1="9" x2="12" y2="15"/>
+              <line x1="9" y1="12" x2="15" y2="12"/>
+            </svg>
+            <span>添加词典</span>
+          </button>
+          <button
+            class="quick-action-btn correct-btn"
+            :class="{ loading: isCorrecting }"
+            :disabled="!fireredReady || isCorrecting"
+            @click="emit('correct-entry')"
+            :title="fireredReady ? '使用 FireRedASR 校正此条字幕' : '请先在设置中安装 FireRedASR'"
+          >
+            <svg v-if="!isCorrecting" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+            </svg>
+            <span v-if="isCorrecting" class="loading-spinner"></span>
+            <span>{{ isCorrecting ? '校正中...' : 'AI校正' }}</span>
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -860,27 +893,35 @@ defineExpose({
 /* 快捷操作 */
 .quick-actions {
   display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 0.75rem 1rem;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem;
   background: #f8fafc;
   border-radius: 10px;
   border: 1px solid #e2e8f0;
 }
 
+.actions-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
 .actions-label {
-  font-size: 0.75rem;
+  font-size: 0.6875rem;
   font-weight: 500;
   color: #94a3b8;
   white-space: nowrap;
   user-select: none;
   -webkit-user-select: none;
+  min-width: 48px;
 }
 
 .actions-group {
   display: flex;
-  gap: 0.5rem;
+  gap: 0.375rem;
   flex: 1;
+  flex-wrap: wrap;
 }
 
 .quick-action-btn {
@@ -916,6 +957,17 @@ defineExpose({
 
 .quick-action-btn svg {
   flex-shrink: 0;
+}
+
+.quick-action-btn.add-dict-btn {
+  background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
+  border-color: #86efac;
+  color: #16a34a;
+}
+
+.quick-action-btn.add-dict-btn:hover {
+  background: linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%);
+  border-color: #4ade80;
 }
 
 .quick-action-btn.correct-btn {

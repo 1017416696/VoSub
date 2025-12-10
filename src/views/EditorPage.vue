@@ -17,6 +17,7 @@ import WaveformViewer from '@/components/WaveformViewer.vue'
 import SettingsDialog from '@/components/SettingsDialog.vue'
 import CorrectionCompareDialog from '@/components/CorrectionCompareDialog.vue'
 import DictionaryPreviewDialog from '@/components/DictionaryPreviewDialog.vue'
+import QuickAddDictionaryDialog from '@/components/QuickAddDictionaryDialog.vue'
 import TitleBar from '@/components/TitleBar.vue'
 import { EditorSidebar, AudioEmptyState, TimelineControls, SubtitleListPanel, SubtitleEditPanel } from '@/components/editor'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -520,6 +521,8 @@ interface DictionaryReplacement {
 
 const showDictionaryDialog = ref(false)
 const dictionaryItems = ref<DictionaryReplacement[]>([])
+const showQuickAddDialog = ref(false)
+const quickAddInitialVariant = ref('')
 
 const handleApplyDictionary = async () => {
   if (subtitleStore.entries.length === 0) {
@@ -580,6 +583,21 @@ const handleDictionaryReplaceAll = async (items: DictionaryReplacement[]) => {
 const handleDictionaryCancel = () => {
   showDictionaryDialog.value = false
   dictionaryItems.value = []
+}
+
+// 快速添加词典 - 从选中文本
+const handleQuickAddFromSelection = (selectedText?: string) => {
+  // 如果没有传入选中文本，尝试从当前活动的输入框获取
+  if (!selectedText) {
+    const activeEl = document.activeElement as HTMLInputElement | HTMLTextAreaElement | null
+    if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA')) {
+      if (activeEl.selectionStart !== activeEl.selectionEnd) {
+        selectedText = activeEl.value.substring(activeEl.selectionStart ?? 0, activeEl.selectionEnd ?? 0)
+      }
+    }
+  }
+  quickAddInitialVariant.value = selectedText?.trim() || ''
+  showQuickAddDialog.value = true
 }
 
 const handleAddCJKSpaces = () => {
@@ -1248,6 +1266,8 @@ const handleKeydown = (e: KeyboardEvent) => {
   else if (shortcuts.zoomIn === pressedKey && hasAudio.value) { e.preventDefault(); waveformViewerRef.value?.zoomIn() }
   else if (shortcuts.zoomOut === pressedKey && hasAudio.value) { e.preventDefault(); waveformViewerRef.value?.zoomOut() }
   else if (shortcuts.zoomReset === pressedKey && hasAudio.value) { e.preventDefault(); handleZoomReset() }
+  // 快速添加词典 (Cmd/Ctrl+D)
+  else if (pressedKey === 'Cmd+d' || pressedKey === 'Ctrl+d') { e.preventDefault(); handleQuickAddFromSelection() }
 }
 
 // 生命周期
@@ -1268,6 +1288,7 @@ onMounted(async () => {
     ;(window as any).__handleMenuSave = async () => await handleSave()
     ;(window as any).__globalBatchAICorrection = async () => await startCorrection()
     ;(window as any).__globalApplyDictionary = async () => await handleApplyDictionary()
+    ;(window as any).__globalQuickAddDictionary = async () => handleQuickAddFromSelection()
     unlistenOpenFile = await listen<void>('menu:open-file', async () => await handleOpenFile())
     document.removeEventListener('keydown', handleKeydown, true)
     document.addEventListener('keydown', handleKeydown, true)
@@ -1284,6 +1305,7 @@ onBeforeUnmount(() => {
   ;(window as any).__handleMenuSave = null
   ;(window as any).__globalBatchAICorrection = null
   ;(window as any).__globalApplyDictionary = null
+  ;(window as any).__globalQuickAddDictionary = null
   document.removeEventListener('keydown', handleKeydown, true)
   document.removeEventListener('keydown', handleAltKeyDown)
   document.removeEventListener('keyup', handleAltKeyUp)
@@ -1420,6 +1442,7 @@ onBeforeUnmount(() => {
           @toggle-correction-mark="handleToggleCorrectionMark"
           @apply-suggestion="handleApplySuggestion"
           @dismiss-suggestion="handleDismissSuggestion"
+          @quick-add-dictionary="handleQuickAddFromSelection"
         />
       </div>
     </div>
@@ -1443,6 +1466,12 @@ onBeforeUnmount(() => {
       @replace="handleDictionaryReplace"
       @replace-all="handleDictionaryReplaceAll"
       @cancel="handleDictionaryCancel"
+    />
+
+    <!-- 快速添加词典弹窗 -->
+    <QuickAddDictionaryDialog
+      v-model:visible="showQuickAddDialog"
+      :initial-variant="quickAddInitialVariant"
     />
 
     <!-- 批量校正进度弹窗 -->

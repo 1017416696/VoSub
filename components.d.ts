@@ -16,6 +16,7 @@ declare module 'vue' {
     DictionaryPreviewDialog: typeof import('./src/components/DictionaryPreviewDialog.vue')['default']
     EditorSidebar: typeof import('./src/components/editor/EditorSidebar.vue')['default']
     GreetComponent: typeof import('./src/components/GreetComponent.vue')['default']
+    QuickAddDictionaryDialog: typeof import('./src/components/QuickAddDictionaryDialog.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
     SearchReplaceBar: typeof import('./src/components/editor/SearchReplaceBar.vue')['default']

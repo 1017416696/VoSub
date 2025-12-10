@@ -367,6 +367,7 @@ fn update_recent_files_menu(app_handle: tauri::AppHandle, files: Vec<RecentFileI
             let save_item = MenuItem::with_id(&app_handle, "save", "保存", true, Some("CmdOrCtrl+S")).map_err(|e| e.to_string())?;
             let close_tab_item = MenuItem::with_id(&app_handle, "close-tab", "关闭标签页", true, Some("CmdOrCtrl+W")).map_err(|e| e.to_string())?;
             let close_window_item = MenuItem::with_id(&app_handle, "close-window", "关闭窗口", true, Some("Cmd+Q")).map_err(|e| e.to_string())?;
+            let add_dict_item = MenuItem::with_id(&app_handle, "add-to-dictionary", "添加到本地词典", true, Some("Cmd+D")).map_err(|e| e.to_string())?;
             let file_menu = SubmenuBuilder::new(&app_handle, "文件")
                 .item(&open_item)
                 .item(&recent_menu)
@@ -385,6 +386,8 @@ fn update_recent_files_menu(app_handle: tauri::AppHandle, files: Vec<RecentFileI
                 .item(&PredefinedMenuItem::copy(&app_handle, Some("复制")).map_err(|e| e.to_string())?)
                 .item(&PredefinedMenuItem::paste(&app_handle, Some("粘贴")).map_err(|e| e.to_string())?)
                 .item(&PredefinedMenuItem::select_all(&app_handle, Some("全选")).map_err(|e| e.to_string())?)
+                .separator()
+                .item(&add_dict_item)
                 .separator()
                 .text("batch-ai-correction", "批量 AI 字幕校正")
                 .separator()
@@ -415,6 +418,7 @@ fn update_recent_files_menu(app_handle: tauri::AppHandle, files: Vec<RecentFileI
             let save_item = MenuItem::with_id(&app_handle, "save", "保存", true, Some("CmdOrCtrl+S")).map_err(|e| e.to_string())?;
             let close_tab_item = MenuItem::with_id(&app_handle, "close-tab", "关闭标签页", true, Some("CmdOrCtrl+W")).map_err(|e| e.to_string())?;
             let close_window_item = MenuItem::with_id(&app_handle, "close-window", "关闭窗口", true, Some("Alt+F4")).map_err(|e| e.to_string())?;
+            let add_dict_item = MenuItem::with_id(&app_handle, "add-to-dictionary", "添加到本地词典", true, Some("Ctrl+D")).map_err(|e| e.to_string())?;
             let file_menu = SubmenuBuilder::new(&app_handle, "文件")
                 .item(&open_item)
                 .item(&recent_menu)
@@ -433,6 +437,8 @@ fn update_recent_files_menu(app_handle: tauri::AppHandle, files: Vec<RecentFileI
                 .item(&PredefinedMenuItem::copy(&app_handle, Some("复制")).map_err(|e| e.to_string())?)
                 .item(&PredefinedMenuItem::paste(&app_handle, Some("粘贴")).map_err(|e| e.to_string())?)
                 .item(&PredefinedMenuItem::select_all(&app_handle, Some("全选")).map_err(|e| e.to_string())?)
+                .separator()
+                .item(&add_dict_item)
                 .separator()
                 .text("batch-ai-correction", "批量 AI 字幕校正")
                 .separator()
@@ -515,6 +521,7 @@ pub fn run() {
                 let save_item = MenuItem::with_id(app, "save", "保存", true, Some("CmdOrCtrl+S"))?;
                 let close_tab_item = MenuItem::with_id(app, "close-tab", "关闭标签页", true, Some("CmdOrCtrl+W"))?;
                 let close_window_item = MenuItem::with_id(app, "close-window", "关闭窗口", true, Some("Cmd+Q"))?;
+                let add_dict_item = MenuItem::with_id(app, "add-to-dictionary", "添加到本地词典", true, Some("Cmd+D"))?;
                 let file_menu = SubmenuBuilder::new(app, "文件")
                     .item(&open_item)
                     .item(&recent_menu)
@@ -533,6 +540,8 @@ pub fn run() {
                     .item(&PredefinedMenuItem::copy(app, Some("复制"))?)
                     .item(&PredefinedMenuItem::paste(app, Some("粘贴"))?)
                     .item(&PredefinedMenuItem::select_all(app, Some("全选"))?)
+                    .separator()
+                    .item(&add_dict_item)
                     .separator()
                     .text("batch-ai-correction", "批量 AI 字幕校正")
                     .separator()
@@ -569,6 +578,7 @@ pub fn run() {
                 let save_item = MenuItem::with_id(app, "save", "保存", true, Some("CmdOrCtrl+S"))?;
                 let close_tab_item = MenuItem::with_id(app, "close-tab", "关闭标签页", true, Some("CmdOrCtrl+W"))?;
                 let close_window_item = MenuItem::with_id(app, "close-window", "关闭窗口", true, Some("Alt+F4"))?;
+                let add_dict_item = MenuItem::with_id(app, "add-to-dictionary", "添加到本地词典", true, Some("Ctrl+D"))?;
                 let file_menu = SubmenuBuilder::new(app, "文件")
                     .item(&open_item)
                     .item(&recent_menu)
@@ -587,6 +597,8 @@ pub fn run() {
                     .item(&PredefinedMenuItem::copy(app, Some("复制"))?)
                     .item(&PredefinedMenuItem::paste(app, Some("粘贴"))?)
                     .item(&PredefinedMenuItem::select_all(app, Some("全选"))?)
+                    .separator()
+                    .item(&add_dict_item)
                     .separator()
                     .text("batch-ai-correction", "批量 AI 字幕校正")
                     .separator()
@@ -719,6 +731,18 @@ pub fn run() {
                                 (async () => {
                                     if (window.__globalBatchToLowerCase && typeof window.__globalBatchToLowerCase === 'function') {
                                         await window.__globalBatchToLowerCase();
+                                    }
+                                })();
+                            "#;
+                            let _ = window.eval(js_code);
+                        }
+                    }
+                    "add-to-dictionary" => {
+                        if let Some(window) = app_handle.get_webview_window("main") {
+                            let js_code = r#"
+                                (async () => {
+                                    if (window.__globalQuickAddDictionary && typeof window.__globalQuickAddDictionary === 'function') {
+                                        await window.__globalQuickAddDictionary();
                                     }
                                 })();
                             "#;
