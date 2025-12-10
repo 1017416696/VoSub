@@ -596,6 +596,10 @@ const shortcutCategories = computed(() => {
       actions: ['undo', 'redo', 'find', 'replace']
     },
     {
+      name: '词典',
+      actions: ['add-to-dictionary']
+    },
+    {
       name: '其他',
       actions: ['settings']
     }
