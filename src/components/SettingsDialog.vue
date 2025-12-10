@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onBeforeUnmount, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useConfigStore, DEFAULT_PUNCTUATION } from '@/stores/config'
 import { useSmartDictionaryStore } from '@/stores/smartDictionary'
@@ -30,7 +30,7 @@ const activeMenu = ref<'general' | 'whisper' | 'dictionary' | 'shortcuts' | 'log
 const menuItems = [
   { key: 'general', label: '常规设置', icon: Setting },
   { key: 'whisper', label: '语音模型', icon: Microphone },
-  { key: 'dictionary', label: '智能词典', icon: Collection },
+  { key: 'dictionary', label: '本地词典', icon: Collection },
   { key: 'shortcuts', label: '快捷键列表', icon: Key },
   { key: 'logs', label: '日志', icon: Document },
   { key: 'contact', label: '联系开发者', icon: ChatDotRound },
@@ -41,22 +41,80 @@ const menuItems = [
 const dictionaryFilter = ref<'all' | 'manual' | 'auto'>('all')
 const newWordCorrect = ref('')
 const newWordVariant = ref('')
+const newWordVariants = ref<string[]>([]) // 新增：存储多个变体标签
+const editingVariantId = ref<string | null>(null) // 当前正在编辑变体的词条ID
+const newVariantInput = ref('') // 新变体输入
+const dictSearchQuery = ref('') // 词典搜索关键词
+const showAddWordDialog = ref(false) // 添加词条弹窗
+const addWordInputRef = ref<HTMLInputElement | null>(null) // 添加词条输入框ref
+
+// 添加词条弹窗的ESC键处理
+const handleAddWordKeydown = (e: KeyboardEvent) => {
+  if (e.key === 'Escape' && showAddWordDialog.value) {
+    e.preventDefault()
+    e.stopPropagation()
+    showAddWordDialog.value = false
+  }
+}
+
+// 打开添加词条弹窗
+const openAddWordDialog = () => {
+  showAddWordDialog.value = true
+  document.addEventListener('keydown', handleAddWordKeydown, true)
+  nextTick(() => {
+    addWordInputRef.value?.focus()
+  })
+}
+
+// 关闭添加词条弹窗
+const closeAddWordDialog = () => {
+  showAddWordDialog.value = false
+  document.removeEventListener('keydown', handleAddWordKeydown, true)
+}
 
 const filteredDictionaryEntries = computed(() => {
+  let entries = smartDictionary.entries
   if (dictionaryFilter.value === 'manual') {
-    return smartDictionary.manualEntries
+    entries = smartDictionary.manualEntries
   } else if (dictionaryFilter.value === 'auto') {
-    return smartDictionary.autoEntries
+    entries = smartDictionary.autoEntries
   }
-  return smartDictionary.entries
+  // 搜索过滤
+  const query = dictSearchQuery.value.trim().toLowerCase()
+  if (query) {
+    entries = entries.filter(e => 
+      e.correct.toLowerCase().includes(query) ||
+      e.variants.some(v => v.toLowerCase().includes(query))
+    )
+  }
+  return entries
 })
+
+// 添加变体标签
+const addVariantTag = () => {
+  const text = newWordVariant.value.trim()
+  if (!text) return
+  // 支持逗号分隔批量添加
+  const parts = text.split(/[,，]/).map(v => v.trim()).filter(v => v)
+  for (const part of parts) {
+    if (!newWordVariants.value.includes(part)) {
+      newWordVariants.value.push(part)
+    }
+  }
+  newWordVariant.value = ''
+}
+
+// 移除变体标签
+const removeVariantTag = (index: number) => {
+  newWordVariants.value.splice(index, 1)
+}
 
 const addNewWord = () => {
   if (!newWordCorrect.value.trim()) {
     ElMessage.warning('请输入正确写法')
     return
   }
-  // 支持用逗号分隔多个变体
+  // 支持从变体输入框直接添加（逗号分隔）
   const variantText = newWordVariant.value.trim()
   const variants = variantText 
     ? variantText.split(/[,，]/).map(v => v.trim()).filter(v => v)
@@ -64,7 +122,45 @@ const addNewWord = () => {
   smartDictionary.addManual(newWordCorrect.value.trim(), variants)
   newWordCorrect.value = ''
   newWordVariant.value = ''
+  newWordVariants.value = []
+  closeAddWordDialog()
   ElMessage.success('添加成功')
+}
+
+// 开始编辑词条的变体
+const startEditVariant = (entryId: string) => {
+  editingVariantId.value = entryId
+  newVariantInput.value = ''
+}
+
+// 自动聚焦指令
+const vAutoFocus = {
+  mounted: (el: HTMLElement) => {
+    setTimeout(() => el.focus(), 0)
+  }
+}
+
+// 取消编辑变体
+const cancelEditVariant = () => {
+  editingVariantId.value = null
+  newVariantInput.value = ''
+}
+
+// 添加变体到词条
+const addVariantToEntry = (entryId: string) => {
+  const text = newVariantInput.value.trim()
+  if (!text) return
+  // 支持逗号分隔批量添加
+  const parts = text.split(/[,，]/).map(v => v.trim()).filter(v => v)
+  for (const part of parts) {
+    smartDictionary.addVariant(entryId, part)
+  }
+  newVariantInput.value = ''
+}
+
+// 删除词条的变体
+const removeVariantFromEntry = (entryId: string, variant: string) => {
+  smartDictionary.removeVariant(entryId, variant)
 }
 
 const removeWord = async (id: string) => {
@@ -407,7 +503,8 @@ const handleClose = () => {
 
 // ESC 键关闭弹窗
 const handleKeydown = (e: KeyboardEvent) => {
-  if (e.key === 'Escape' && props.visible) {
+  // 如果添加词条弹窗打开，不处理ESC（让添加词条弹窗处理）
+  if (e.key === 'Escape' && props.visible && !showAddWordDialog.value) {
     e.preventDefault()
     e.stopPropagation()
     handleClose()
@@ -825,98 +922,130 @@ const shortcutCategories = computed(() => {
               </div>
             </div>
 
-            <!-- 智能词典 -->
-            <div v-if="activeMenu === 'dictionary'" class="content-section">
-              <div class="section-header">
-                <h2 class="section-title">智能词典</h2>
-                <div class="section-actions">
-                  <el-button size="small" @click="importDictionary">导入</el-button>
-                  <el-button size="small" @click="exportDictionary">导出</el-button>
+            <!-- 本地词典 -->
+            <div v-if="activeMenu === 'dictionary'" class="content-section dict-section">
+              <!-- 顶部标题栏 -->
+              <div class="dict-header">
+                <div class="dict-header-left">
+                  <h2 class="dict-title">本地词典</h2>
+                  <span class="dict-count">{{ smartDictionary.totalCount }} 个词条</span>
                 </div>
-              </div>
-              
-              <p class="section-desc">
-                添加常用术语和专有名词，转录和校正时自动替换。共 <strong>{{ smartDictionary.totalCount }}</strong> 个词条。
-              </p>
-
-              <!-- 添加新词 -->
-              <div class="dict-add-card">
-                <div class="dict-add-row">
-                  <div class="dict-input-group">
-                    <label class="dict-input-label">正确写法</label>
-                    <el-input 
-                      v-model="newWordCorrect" 
-                      placeholder="如：Kubernetes、ChatGPT"
-                      @keyup.enter="addNewWord"
-                    />
-                  </div>
-                  <div class="dict-input-group">
-                    <label class="dict-input-label">错误变体 <span class="optional">(可选)</span></label>
-                    <el-input 
-                      v-model="newWordVariant" 
-                      placeholder="如：酷伯内特斯、K8S"
-                      @keyup.enter="addNewWord"
-                    />
-                  </div>
-                  <el-button type="primary" class="dict-add-btn" @click="addNewWord">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <line x1="12" y1="5" x2="12" y2="19"></line>
-                      <line x1="5" y1="12" x2="19" y2="12"></line>
+                <div class="dict-header-actions">
+                  <button class="dict-action-btn" @click="importDictionary">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                      <polyline points="7 10 12 15 17 10"/>
+                      <line x1="12" y1="15" x2="12" y2="3"/>
                     </svg>
-                    添加
-                  </el-button>
+                    导入
+                  </button>
+                  <button class="dict-action-btn" @click="exportDictionary">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                      <polyline points="17 8 12 3 7 8"/>
+                      <line x1="12" y1="3" x2="12" y2="15"/>
+                    </svg>
+                    导出
+                  </button>
                 </div>
-                <p class="dict-add-hint">
-                  💡 提示：错误变体是语音识别可能出现的错误写法，可以添加多个（用逗号分隔）
-                </p>
               </div>
 
               <!-- 词条列表 -->
-              <div class="dict-list-section">
+              <div class="dict-list">
                 <div class="dict-list-header">
-                  <span class="dict-list-title">词条列表</span>
-                  <el-button 
-                    v-if="smartDictionary.totalCount > 0"
-                    size="small" 
-                    text
-                    type="danger"
-                    @click="clearAllWords"
-                  >
-                    清空全部
-                  </el-button>
+                  <div class="dict-search-box">
+                    <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <circle cx="11" cy="11" r="8"/>
+                      <path d="m21 21-4.35-4.35"/>
+                    </svg>
+                    <input 
+                      v-model="dictSearchQuery"
+                      type="text"
+                      placeholder="搜索词条..."
+                      class="dict-search-input"
+                    />
+                    <button 
+                      v-if="dictSearchQuery"
+                      class="search-clear-btn"
+                      @click="dictSearchQuery = ''"
+                    >×</button>
+                  </div>
+                  <div class="dict-list-actions">
+                    <button class="dict-add-entry-btn" @click="openAddWordDialog">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="12" y1="5" x2="12" y2="19"/>
+                        <line x1="5" y1="12" x2="19" y2="12"/>
+                      </svg>
+                      添加
+                    </button>
+                    <button 
+                      v-if="smartDictionary.totalCount > 0"
+                      class="clear-all-btn"
+                      @click="clearAllWords"
+                    >
+                      清空
+                    </button>
+                  </div>
                 </div>
                 
                 <div class="dict-entries">
                   <div 
-                    v-for="entry in smartDictionary.entries" 
+                    v-for="entry in filteredDictionaryEntries" 
                     :key="entry.id" 
                     class="dict-entry"
                   >
-                    <div class="dict-entry-main">
-                      <span class="dict-entry-correct">{{ entry.correct }}</span>
-                      <div v-if="entry.variants.length > 0" class="dict-entry-variants">
-                        <span 
-                          v-for="(variant, idx) in entry.variants" 
-                          :key="idx" 
-                          class="variant-tag"
-                        >{{ variant }}</span>
+                    <div class="entry-top">
+                      <span class="entry-correct">{{ entry.correct }}</span>
+                      <div class="entry-actions">
+                        <span v-if="entry.useCount > 0" class="entry-count">已用 {{ entry.useCount }} 次</span>
+                        <button class="entry-delete" @click="removeWord(entry.id)">×</button>
                       </div>
                     </div>
-                    <div class="dict-entry-actions">
-                      <span v-if="entry.useCount > 0" class="dict-entry-count">
-                        已用 {{ entry.useCount }} 次
+                    
+                    <div class="entry-variants">
+                      <span 
+                        v-for="(variant, idx) in entry.variants" 
+                        :key="idx" 
+                        class="variant-tag"
+                      >
+                        {{ variant }}
+                        <button @click="removeVariantFromEntry(entry.id, variant)">×</button>
                       </span>
-                      <button class="dict-entry-delete" @click="removeWord(entry.id)" title="删除">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                          <line x1="18" y1="6" x2="6" y2="18"></line>
-                          <line x1="6" y1="6" x2="18" y2="18"></line>
-                        </svg>
+                      
+                      <div v-if="editingVariantId === entry.id" class="variant-input">
+                        <input 
+                          v-auto-focus
+                          v-model="newVariantInput"
+                          type="text"
+                          placeholder="输入变体后回车"
+                          @keyup.enter="addVariantToEntry(entry.id)"
+                          @keyup.escape="cancelEditVariant"
+                          @blur="newVariantInput.trim() ? addVariantToEntry(entry.id) : cancelEditVariant()"
+                        />
+                      </div>
+                      <button 
+                        v-else
+                        class="add-variant-btn"
+                        @click="startEditVariant(entry.id)"
+                      >
+                        +
                       </button>
                     </div>
                   </div>
                   
-                  <div v-if="smartDictionary.totalCount === 0" class="dict-empty">
-                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <!-- 搜索无结果 -->
+                  <div v-if="dictSearchQuery && filteredDictionaryEntries.length === 0" class="dict-empty">
+                    <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                      <circle cx="11" cy="11" r="8"/>
+                      <path d="m21 21-4.35-4.35"/>
+                    </svg>
+                    <p>未找到匹配的词条</p>
+                    <span>尝试其他关键词</span>
+                  </div>
+                  
+                  <!-- 词典为空 -->
+                  <div v-else-if="smartDictionary.totalCount === 0" class="dict-empty">
+                    <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
                       <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
                       <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
                     </svg>
@@ -925,6 +1054,52 @@ const shortcutCategories = computed(() => {
                   </div>
                 </div>
               </div>
+              
+              <!-- 添加词条弹窗 -->
+              <Teleport to="body">
+                <Transition name="fade">
+                  <div v-if="showAddWordDialog" class="add-word-overlay" @click.self="closeAddWordDialog">
+                    <div class="add-word-dialog">
+                      <div class="add-word-header">
+                        <h3>添加词条</h3>
+                        <button class="add-word-close" @click="closeAddWordDialog">×</button>
+                      </div>
+                      <div class="add-word-body">
+                        <div class="add-word-field">
+                          <label>正确写法</label>
+                          <input 
+                            ref="addWordInputRef"
+                            v-model="newWordCorrect"
+                            type="text"
+                            placeholder="输入正确的词语，如 Kubernetes"
+                            @keyup.enter="addNewWord"
+                          />
+                        </div>
+                        <div class="add-word-field">
+                          <label>错误变体 <span class="field-hint">可选</span></label>
+                          <input 
+                            v-model="newWordVariant"
+                            type="text"
+                            placeholder="语音识别可能出现的错误写法，多个用逗号分隔"
+                            @keyup.enter="addNewWord"
+                          />
+                          <p class="field-desc">例如：酷伯内特斯, K8S, 库伯内特斯</p>
+                        </div>
+                      </div>
+                      <div class="add-word-footer">
+                        <button class="add-word-cancel" @click="closeAddWordDialog">取消</button>
+                        <button 
+                          class="add-word-confirm" 
+                          :disabled="!newWordCorrect.trim()"
+                          @click="addNewWord"
+                        >
+                          添加
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </Transition>
+              </Teleport>
             </div>
 
             <!-- 快捷键列表 -->
@@ -1903,57 +2078,252 @@ const shortcutCategories = computed(() => {
   transition: background 0.2s;
 }
 
-/* 词典添加卡片 */
-.dict-add-card {
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
-  padding: 20px;
-  margin-bottom: 20px;
-}
-
-.dict-add-row {
+/* 本地词典专用样式 */
+.dict-section {
   display: flex;
-  gap: 12px;
-  align-items: flex-end;
-}
-
-.dict-input-group {
+  flex-direction: column;
+  gap: 16px;
   flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
-.dict-input-label {
-  display: block;
+.dict-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.dict-header-left {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.dict-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: #1f2937;
+  margin: 0;
+}
+
+.dict-count {
+  font-size: 13px;
+  color: #9ca3af;
+}
+
+.dict-header-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.dict-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  font-size: 13px;
+  color: #6b7280;
+  background: #f3f4f6;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.dict-action-btn:hover {
+  background: #e5e7eb;
+  color: #374151;
+}
+
+/* 列表头部操作按钮 */
+.dict-list-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dict-add-entry-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  color: white;
+  background: #10b981;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.dict-add-entry-btn:hover {
+  background: #059669;
+}
+
+/* 添加词条弹窗 */
+.add-word-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 3000;
+}
+
+.add-word-dialog {
+  width: 420px;
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15);
+  overflow: hidden;
+}
+
+.add-word-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.add-word-header h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.add-word-close {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  color: #9ca3af;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.add-word-close:hover {
+  background: #f3f4f6;
+  color: #6b7280;
+}
+
+.add-word-body {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.add-word-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.add-word-field label {
   font-size: 13px;
   font-weight: 500;
   color: #374151;
-  margin-bottom: 6px;
 }
 
-.dict-input-label .optional {
+.field-hint {
   font-weight: 400;
   color: #9ca3af;
 }
 
-.dict-add-btn {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  height: 32px;
-  flex-shrink: 0;
+.add-word-field input {
+  height: 40px;
+  padding: 0 12px;
+  font-size: 14px;
+  color: #374151;
+  background: #fff;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  outline: none;
+  transition: all 0.15s;
 }
 
-.dict-add-hint {
-  margin: 12px 0 0;
+.add-word-field input:focus {
+  border-color: #10b981;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1);
+}
+
+.add-word-field input::placeholder {
+  color: #9ca3af;
+}
+
+.field-desc {
+  margin: 0;
   font-size: 12px;
+  color: #9ca3af;
+}
+
+.add-word-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 16px 20px;
+  background: #f9fafb;
+  border-top: 1px solid #e5e7eb;
+}
+
+.add-word-cancel {
+  padding: 8px 16px;
+  font-size: 14px;
   color: #6b7280;
+  background: white;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.add-word-cancel:hover {
+  background: #f3f4f6;
+}
+
+.add-word-confirm {
+  padding: 8px 20px;
+  font-size: 14px;
+  font-weight: 500;
+  color: white;
+  background: #10b981;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.add-word-confirm:hover:not(:disabled) {
+  background: #059669;
+}
+
+.add-word-confirm:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* 词条列表 */
-.dict-list-section {
+.dict-list {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
   background: #fff;
   border: 1px solid #e2e8f0;
-  border-radius: 12px;
+  border-radius: 10px;
   overflow: hidden;
 }
 
@@ -1961,96 +2331,235 @@ const shortcutCategories = computed(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 12px 16px;
+  gap: 12px;
+  padding: 10px 14px;
   background: #f8fafc;
   border-bottom: 1px solid #e2e8f0;
 }
 
-.dict-list-title {
+.dict-search-box {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  max-width: 240px;
+  height: 30px;
+  padding: 0 10px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  transition: all 0.15s;
+}
+
+.dict-search-box:focus-within {
+  border-color: #10b981;
+  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.1);
+}
+
+.search-icon {
+  color: #9ca3af;
+  flex-shrink: 0;
+}
+
+.dict-search-input {
+  flex: 1;
+  height: 100%;
+  padding: 0 8px;
   font-size: 13px;
-  font-weight: 600;
   color: #374151;
+  background: transparent;
+  border: none;
+  outline: none;
+}
+
+.dict-search-input::placeholder {
+  color: #9ca3af;
+}
+
+.search-clear-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
+  min-height: 16px;
+  padding: 0;
+  font-size: 12px;
+  line-height: 1;
+  color: #9ca3af;
+  background: #e5e7eb;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+
+.search-clear-btn:hover {
+  background: #d1d5db;
+  color: #6b7280;
+}
+
+.clear-all-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #ef4444;
+  background: #fff;
+  border: 1px solid #fecaca;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.clear-all-btn:hover {
+  background: #fef2f2;
+  border-color: #fca5a5;
 }
 
 .dict-entries {
-  max-height: 320px;
+  flex: 1;
   overflow-y: auto;
+  min-height: 0;
 }
 
 .dict-entry {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 16px;
+  padding: 12px 14px;
   border-bottom: 1px solid #f1f5f9;
-  transition: background 0.15s;
 }
 
 .dict-entry:last-child {
   border-bottom: none;
 }
 
-.dict-entry:hover {
-  background: #f8fafc;
-}
-
-.dict-entry-main {
+.entry-top {
   display: flex;
+  justify-content: space-between;
   align-items: center;
-  gap: 12px;
-  flex: 1;
-  min-width: 0;
+  margin-bottom: 6px;
 }
 
-.dict-entry-correct {
+.entry-correct {
+  font-size: 15px;
   font-weight: 600;
   color: #10b981;
-  font-size: 14px;
 }
 
-.dict-entry-variants {
+.entry-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.entry-count {
+  font-size: 11px;
+  color: #9ca3af;
+}
+
+.entry-delete {
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  color: #9ca3af;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.entry-delete:hover {
+  color: #ef4444;
+  background: #fef2f2;
+}
+
+.entry-variants {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 6px;
 }
 
 .variant-tag {
-  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   padding: 2px 8px;
+  font-size: 12px;
   background: #fef3c7;
   color: #92400e;
   border-radius: 4px;
 }
 
-.dict-entry-actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-shrink: 0;
-}
-
-.dict-entry-count {
-  font-size: 12px;
-  color: #9ca3af;
-}
-
-.dict-entry-delete {
-  display: flex;
+.variant-tag button {
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
+  width: 14px;
+  height: 14px;
+  font-size: 12px;
+  color: #b45309;
+  background: none;
   border: none;
-  background: transparent;
-  border-radius: 4px;
+  border-radius: 50%;
   cursor: pointer;
-  color: #9ca3af;
+  opacity: 0.6;
   transition: all 0.15s;
 }
 
-.dict-entry-delete:hover {
-  background: #fee2e2;
-  color: #dc2626;
+.variant-tag button:hover {
+  opacity: 1;
+  background: rgba(180, 83, 9, 0.15);
+}
+
+.variant-input {
+  display: inline-flex;
+}
+
+.variant-input input {
+  width: 120px;
+  padding: 4px 8px;
+  font-size: 13px;
+  color: #374151;
+  border: 1px solid #10b981;
+  border-radius: 4px;
+  outline: none;
+  background: white;
+}
+
+.variant-input input::placeholder {
+  color: #9ca3af;
+}
+
+.variant-input input:focus {
+  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.15);
+}
+
+.add-variant-btn {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  color: #9ca3af;
+  background: none;
+  border: 1px dashed #d1d5db;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.add-variant-btn:hover {
+  color: #10b981;
+  border-color: #10b981;
+  background: #f0fdf4;
 }
 
 .dict-empty {

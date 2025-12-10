@@ -101,13 +101,13 @@ const emit = defineEmits<{
         </svg>
         <span v-if="needsCorrectionCount > 0" class="badge">{{ needsCorrectionCount > 99 ? '99+' : needsCorrectionCount }}</span>
       </button>
-      <!-- 应用智能词典 -->
+      <!-- 应用本地词典 -->
       <button
         class="sidebar-btn"
         :class="{ 'has-badge': dictionaryCount > 0 }"
         @click="emit('apply-dictionary')"
         :disabled="!hasSubtitles || dictionaryCount === 0"
-        :title="`应用智能词典 (${dictionaryCount} 条)`"
+        :title="`应用本地词典 (${dictionaryCount} 条)`"
       >
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
