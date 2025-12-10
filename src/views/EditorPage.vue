@@ -1349,7 +1349,7 @@ onBeforeUnmount(() => {
         :has-subtitles="hasContent"
         :show-only-needs-correction="showOnlyNeedsCorrection"
         :needs-correction-count="subtitleStore.needsCorrectionCount"
-        :dictionary-count="smartDictionary.totalCount"
+        
         @add-subtitle="openSubtitle"
         @toggle-search="toggleSearchPanel"
         @toggle-scissor="handleScissor"

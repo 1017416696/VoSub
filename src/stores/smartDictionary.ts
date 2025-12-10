@@ -51,6 +51,18 @@ export const useSmartDictionaryStore = defineStore('smartDictionary', () => {
     return entry
   }
 
+  // ========== 检查文本是否匹配词典（不执行替换） ==========
+  const matchesDictionary = (text: string): boolean => {
+    for (const entry of entries.value) {
+      for (const variant of entry.variants) {
+        if (text.includes(variant)) {
+          return true
+        }
+      }
+    }
+    return false
+  }
+
   // ========== 应用词典 ==========
   const applyDictionary = (text: string): { result: string; replacements: Array<{ from: string; to: string }> } => {
     let result = text
@@ -178,6 +190,7 @@ export const useSmartDictionaryStore = defineStore('smartDictionary', () => {
     addVariant,
     removeVariant,
     clearAll,
+    matchesDictionary,
     applyDictionary,
     exportDictionary,
     importDictionary,
