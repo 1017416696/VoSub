@@ -315,6 +315,28 @@ document.addEventListener('keydown', (e: KeyboardEvent) => {
 
 app.mount('#app')
 
+// 全局禁用所有按钮的 Tab 键导航
+const disableButtonTabNavigation = () => {
+  // 获取所有按钮元素
+  const buttons = document.querySelectorAll('button:not([tabindex]), .el-button:not([tabindex])')
+  buttons.forEach(button => {
+    button.setAttribute('tabindex', '-1')
+  })
+}
+
+// 初始执行一次
+setTimeout(disableButtonTabNavigation, 100)
+
+// 使用 MutationObserver 监听 DOM 变化，自动为新增的按钮设置 tabindex
+const observer = new MutationObserver(() => {
+  disableButtonTabNavigation()
+})
+
+observer.observe(document.body, {
+  childList: true,
+  subtree: true,
+})
+
 // 应用启动后初始化最近文件菜单
 setTimeout(async () => {
   await updateRecentFilesMenu()

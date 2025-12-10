@@ -23,6 +23,24 @@ button {
   @apply cursor-default select-none;
 }
 
+/* 禁用所有按钮的 Tab 键导航 */
+button,
+.el-button,
+button[type="button"],
+.el-tooltip__trigger {
+  -webkit-user-select: none;
+  user-select: none;
+  pointer-events: auto;
+}
+
+button:focus,
+.el-button:focus,
+button:focus-visible,
+.el-button:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
 a {
   @apply text-sky-500;
 }

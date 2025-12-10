@@ -45,6 +45,25 @@ const handleSearchKeydown = (e: KeyboardEvent) => {
   } else if (e.key === 'Escape') {
     e.preventDefault()
     emit('close')
+  } else if (e.key === 'Tab' && !e.shiftKey && props.showReplace) {
+    // 按下 Tab 且替换框可见时，将焦点移到替换框
+    e.preventDefault()
+    nextTick(() => {
+      replaceInputRef.value?.focus()
+    })
+  }
+}
+
+const handleReplaceKeydown = (e: KeyboardEvent) => {
+  if (e.key === 'Escape') {
+    e.preventDefault()
+    emit('close')
+  } else if (e.key === 'Tab' && e.shiftKey) {
+    // 按下 Shift+Tab 时，将焦点移回搜索框
+    e.preventDefault()
+    nextTick(() => {
+      searchInputRef.value?.focus()
+    })
   }
 }
 </script>
@@ -86,6 +105,7 @@ const handleSearchKeydown = (e: KeyboardEvent) => {
         ref="replaceInputRef"
         :model-value="replaceValue"
         @update:model-value="emit('update:replaceValue', $event)"
+        @keydown="handleReplaceKeydown"
         placeholder="替换为..."
         clearable
         class="replace-input"
