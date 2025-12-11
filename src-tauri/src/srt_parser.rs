@@ -300,6 +300,7 @@ pub fn export_to_fcpxml(
         .unwrap_or(0);
     
     let time_base = (fps * 100.0) as u64;
+    let gap_duration = total_duration + 10000;
 
     let mut content = format!(r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE fcpxml>
@@ -307,14 +308,15 @@ pub fn export_to_fcpxml(
 <fcpxml version="1.8">
   <resources>
     <format id="r1" name="{}" frameDuration="{}" width="1920" height="1080" colorSpace="1-1-1 (Rec. 709)"/>
-    <effect id="r2" name="Basic Title" uid=".../Titles.localized/Bumper:Opener.localized/Basic Title.localized/Basic Title.moti"/>
+    <effect id="r2" name="自定" uid=".../Titles.localized/Build In:Out.localized/Custom.localized/Custom.moti"/>
   </resources>
   <library>
     <event name="Subtitles">
       <project name="Subtitles">
         <sequence duration="{}/{}s" format="r1" tcStart="0s" tcFormat="NDF" audioLayout="stereo" audioRate="48k">
           <spine>
-"#, format_name, frame_duration, total_duration + 10000, time_base);
+            <gap name="空隙" offset="0s" duration="{}/{}s">
+"#, format_name, frame_duration, gap_duration, time_base, gap_duration, time_base);
 
     for (index, entry) in entries.iter().enumerate() {
         // Convert time to the same time base (fps * 100)
@@ -332,16 +334,18 @@ pub fn export_to_fcpxml(
             .replace('\n', " ");
 
         content.push_str(&format!(
-            r#"            <title ref="r2" name="{} - 自定" lane="1" offset="{}/{}s" duration="{}/{}s">
-              <param name="位置" key="9999/10199/10201/1/100/101" value="{} {}"/>
-              <param name="对齐" key="9999/10199/10201/2/354/1002961760/401" value="1 (居中)"/>
-              <text>
-                <text-style ref="ts{}">{}</text-style>
-              </text>
-              <text-style-def id="ts{}">
-                <text-style font="PingFang SC" fontSize="62" fontFace="Semibold" fontColor="1 1 1 1" bold="1" alignment="center"/>
-              </text-style-def>
-            </title>
+            r#"<title name="{} - 自定" lane="1" offset="{}/{}s" ref="r2" duration="{}/{}s">
+<param name="位置" key="9999/10199/10201/1/100/101" value="{} {}"/>
+<param name="对齐" key="9999/10199/10201/2/354/1002961760/401" value="1 (居中)"/>
+<param name="Out Sequencing" key="9999/10199/10201/4/10233/201/202" value="0 (到)"/>
+
+<text>
+  <text-style ref="ts{}">{}</text-style>
+</text>
+<text-style-def id="ts{}">
+  <text-style font="PingFang SC" fontSize="62" fontFace="Semibold" fontColor="1 1 1 1" bold="1" strokeColor="0.329705 0.329721 0.329713 1" strokeWidth="-1" shadowColor="0 0 0 0.75" shadowOffset="3 315" kerning="1.24" alignment="center"/>
+</text-style-def>
+</title>
 "#,
             escaped_text.chars().take(20).collect::<String>(),
             start_units, time_base,
@@ -353,7 +357,8 @@ pub fn export_to_fcpxml(
         ));
     }
 
-    content.push_str(r#"          </spine>
+    content.push_str(r#"            </gap>
+          </spine>
         </sequence>
       </project>
     </event>
