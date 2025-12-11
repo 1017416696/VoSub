@@ -261,6 +261,7 @@ fn write_transcription_script() -> Result<(), String> {
     let script_path = scripts_dir.join("sensevoice_transcribe.py");
     
     // 简化版脚本 - 直接使用 VAD 分段，不做额外合并
+    // 增加进度输出到 stderr
     let script_content = r#"#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """SenseVoice 转录脚本 - 参考 jianchang512/sense-api 实现"""
@@ -271,7 +272,20 @@ import re
 import argparse
 import os
 import tempfile
+import time
 from pydub import AudioSegment
+
+def emit_progress(current, total, status, message=""):
+    """输出进度信息到 stderr（JSON 格式）"""
+    progress = {
+        "type": "progress",
+        "current": current,
+        "total": total,
+        "percent": round(current / total * 100, 1) if total > 0 else 0,
+        "status": status,
+        "message": message
+    }
+    print(json.dumps(progress, ensure_ascii=False), file=sys.stderr, flush=True)
 
 def clean_text(text):
     """清理特殊标签和不需要的字符"""
@@ -289,6 +303,8 @@ def transcribe(audio_path, language="auto"):
     from funasr import AutoModel
     from funasr.utils.postprocess_utils import rich_transcription_postprocess
     
+    emit_progress(0, 100, "loading", "正在加载语音模型...")
+    
     # 加载 VAD 模型（关键参数：max_end_silence_time=250 让分段更敏感）
     vad_model = AutoModel(
         model="fsmn-vad",
@@ -297,6 +313,8 @@ def transcribe(audio_path, language="auto"):
         device="cpu"
     )
     
+    emit_progress(5, 100, "loading", "正在加载 SenseVoice 模型...")
+    
     # 加载 SenseVoice 模型
     model = AutoModel(
         model="iic/SenseVoiceSmall",
@@ -304,21 +322,49 @@ def transcribe(audio_path, language="auto"):
         device="cpu"
     )
     
+    emit_progress(10, 100, "vad", "正在分析语音片段...")
+    
     # VAD 分段
     vad_res = vad_model.generate(input=audio_path)
     if not vad_res or not vad_res[0].get("value"):
         return {"segments": []}
     
-    # 加载音频
+    segments = vad_res[0]["value"]
+    total_segments = len(segments)
+    
+    # 计算音频总时长用于预估
     audio = AudioSegment.from_file(audio_path)
+    audio_duration_sec = len(audio) / 1000.0
+    
+    emit_progress(15, 100, "transcribing", f"共 {total_segments} 个片段，音频时长 {audio_duration_sec:.1f} 秒")
     
     # 创建临时目录
     tmp_dir = tempfile.mkdtemp()
     
     all_segments = []
+    start_time = time.time()
+    
     try:
-        for seg in vad_res[0]["value"]:
+        for idx, seg in enumerate(segments):
             start_ms, end_ms = seg[0], seg[1]
+            
+            # 计算进度（15% - 95% 用于转录）
+            progress = 15 + int((idx / total_segments) * 80)
+            
+            # 计算预估剩余时间
+            elapsed = time.time() - start_time
+            if idx > 0:
+                avg_time_per_seg = elapsed / idx
+                remaining_segs = total_segments - idx
+                eta_sec = avg_time_per_seg * remaining_segs
+                if eta_sec < 60:
+                    eta_str = f"预计剩余 {int(eta_sec)} 秒"
+                else:
+                    eta_str = f"预计剩余 {int(eta_sec / 60)} 分 {int(eta_sec % 60)} 秒"
+            else:
+                eta_str = "正在估算..."
+            
+            emit_progress(progress, 100, "transcribing", f"正在转录 {idx + 1}/{total_segments}，{eta_str}")
             
             # 切分音频片段
             chunk = audio[start_ms:end_ms]
@@ -328,10 +374,12 @@ def transcribe(audio_path, language="auto"):
             # 转录
             res = model.generate(input=chunk_file, language=language, use_itn=True)
             if not res:
+                os.remove(chunk_file)
                 continue
             
             text = res[0].get("text", "")
             if not text:
+                os.remove(chunk_file)
                 continue
             
             try:
@@ -356,6 +404,7 @@ def transcribe(audio_path, language="auto"):
         except:
             pass
     
+    emit_progress(100, 100, "completed", f"转录完成，共 {len(all_segments)} 条字幕")
     return {"segments": all_segments}
 
 def main():
@@ -399,6 +448,16 @@ if __name__ == "__main__":
 }
 
 
+/// Python 脚本输出的进度信息
+#[derive(Debug, Deserialize)]
+struct PythonProgress {
+    #[serde(rename = "type")]
+    msg_type: String,
+    percent: f32,
+    status: String,
+    message: String,
+}
+
 /// 使用 SenseVoice 转录音频
 pub async fn transcribe_with_sensevoice(
     audio_path: String,
@@ -420,10 +479,10 @@ pub async fn transcribe_with_sensevoice(
     // 每次都更新脚本，确保使用最新版本
     write_transcription_script()?;
     
-    // 发送进度
+    // 发送初始进度
     let _ = window.emit("transcription-progress", SenseVoiceProgress {
-        progress: 10.0,
-        current_text: "正在加载 SenseVoice 模型...".to_string(),
+        progress: 0.0,
+        current_text: "正在启动 SenseVoice...".to_string(),
         status: "loading".to_string(),
     });
     
@@ -433,13 +492,6 @@ pub async fn transcribe_with_sensevoice(
     
     // 创建临时输出文件
     let output_path = std::env::temp_dir().join(format!("sensevoice_output_{}.json", std::process::id()));
-    
-    // 发送进度
-    let _ = window.emit("transcription-progress", SenseVoiceProgress {
-        progress: 0.0,  // SenseVoice 没有真实进度，设为 0
-        current_text: "正在使用 SenseVoice 转录...".to_string(),
-        status: "transcribing".to_string(),
-    });
     
     // 映射语言代码
     let lang_code = match language.as_str() {
@@ -451,16 +503,59 @@ pub async fn transcribe_with_sensevoice(
         _ => "auto",
     };
     
-    // 执行 Python 脚本
-    let output = Command::new(&python_path)
+    // 使用 spawn 启动进程，以便异步读取 stderr
+    use std::process::Stdio;
+    use std::io::{BufRead, BufReader};
+    
+    let mut child = Command::new(&python_path)
         .args([
             script_path.to_str().unwrap(),
             &audio_path,
             "--language", lang_code,
             "--output", output_path.to_str().unwrap(),
         ])
-        .output()
+        .stderr(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
         .map_err(|e| format!("执行转录脚本失败: {}", e))?;
+    
+    // 获取 stderr 用于读取进度
+    let stderr = child.stderr.take()
+        .ok_or_else(|| "无法获取 stderr".to_string())?;
+    
+    // 在后台线程读取 stderr 并发送进度
+    let window_clone = window.clone();
+    let stderr_handle = std::thread::spawn(move || {
+        let reader = BufReader::new(stderr);
+        let mut last_error = String::new();
+        
+        for line in reader.lines() {
+            if let Ok(line) = line {
+                // 尝试解析为进度 JSON
+                if let Ok(progress) = serde_json::from_str::<PythonProgress>(&line) {
+                    if progress.msg_type == "progress" {
+                        let _ = window_clone.emit("transcription-progress", SenseVoiceProgress {
+                            progress: progress.percent,
+                            current_text: progress.message,
+                            status: progress.status,
+                        });
+                    }
+                } else {
+                    // 非进度信息，可能是错误
+                    last_error = line;
+                }
+            }
+        }
+        last_error
+    });
+    
+    // 等待进程完成
+    let status = child.wait()
+        .map_err(|e| format!("等待进程失败: {}", e))?;
+    
+    // 获取 stderr 线程的结果
+    let last_error = stderr_handle.join()
+        .map_err(|_| "读取 stderr 线程失败".to_string())?;
     
     if is_cancelled() {
         // 清理临时文件
@@ -468,17 +563,19 @@ pub async fn transcribe_with_sensevoice(
         return Err("转录已取消".to_string());
     }
     
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("转录失败: {}", stderr));
+    if !status.success() {
+        let _ = std::fs::remove_file(&output_path);
+        if !last_error.is_empty() {
+            // 尝试解析错误 JSON
+            if let Ok(err_json) = serde_json::from_str::<serde_json::Value>(&last_error) {
+                if let Some(err_msg) = err_json.get("error").and_then(|v| v.as_str()) {
+                    return Err(format!("转录失败: {}", err_msg));
+                }
+            }
+            return Err(format!("转录失败: {}", last_error));
+        }
+        return Err("转录失败: 未知错误".to_string());
     }
-    
-    // 发送进度
-    let _ = window.emit("transcription-progress", SenseVoiceProgress {
-        progress: 80.0,
-        current_text: "正在生成字幕...".to_string(),
-        status: "converting".to_string(),
-    });
     
     // 读取结果
     let result_json = std::fs::read_to_string(&output_path)

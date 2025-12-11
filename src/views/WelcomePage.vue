@@ -74,15 +74,20 @@ const showEngineDropdown = computed(() => {
   return downloadedModels.value.length > 0 || sensevoiceEnvStatus.value.ready
 })
 
-// 是否显示下载进度条（只有下载模型时才有真实进度）
+// 是否显示下载进度条（下载模型时）
 const isDownloading = computed(() => {
   return transcriptionMessage.value.includes('Downloading') || 
          (transcriptionMessage.value.includes('下载') && !transcriptionMessage.value.includes('首次'))
 })
 
-// 是否正在使用 SenseVoice 转录（不显示进度条）
+// 是否正在使用 SenseVoice 转录（现在也显示进度条）
 const isSensevoiceTranscribing = computed(() => {
   return configStore.transcriptionEngine === 'sensevoice' && isTranscribing.value && !isInstallingSensevoice.value
+})
+
+// 是否显示真实进度条（下载模型或 SenseVoice 转录时）
+const showRealProgress = computed(() => {
+  return isDownloading.value || isSensevoiceTranscribing.value
 })
 
 // 本地化消息
@@ -629,8 +634,8 @@ const onSelectModel = (command: string) => {
           
           <!-- 进度信息 -->
           <div class="progress-info">
-            <!-- 下载时显示真实进度条 -->
-            <template v-if="isDownloading">
+            <!-- 下载或 SenseVoice 转录时显示真实进度条 -->
+            <template v-if="showRealProgress">
               <div class="progress-bar-container">
                 <div class="progress-bar-track">
                   <div 
@@ -648,7 +653,7 @@ const onSelectModel = (command: string) => {
                 <span class="progress-status">{{ localizedMessage }}</span>
               </div>
             </template>
-            <!-- 转录时只显示状态文字（不显示进度条） -->
+            <!-- Whisper 转录时只显示状态文字（不显示进度条） -->
             <template v-else>
               <p class="transcription-status">{{ localizedMessage }}</p>
             </template>
@@ -657,10 +662,7 @@ const onSelectModel = (command: string) => {
           <!-- 提示信息 -->
           <p class="transcription-hint">
             <i class="i-mdi-information-outline"></i>
-            <template v-if="isSensevoiceTranscribing">
-              SenseVoice 正在处理，请稍候...
-            </template>
-            <template v-else-if="transcriptionMessage.includes('下载') || transcriptionMessage.includes('首次')">
+            <template v-if="transcriptionMessage.includes('下载') || transcriptionMessage.includes('首次')">
               首次使用需要下载模型，请耐心等待
             </template>
             <template v-else>
@@ -1217,6 +1219,7 @@ const onSelectModel = (command: string) => {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 12px;
 }
 
 .progress-percentage {
@@ -1237,10 +1240,9 @@ const onSelectModel = (command: string) => {
 .progress-status {
   font-size: 13px;
   color: #909399;
-  max-width: 200px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  text-align: right;
+  flex: 1;
+  min-width: 0;
 }
 
 /* 提示信息 */
