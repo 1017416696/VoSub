@@ -2,24 +2,87 @@
   <div class="timeline-editor">
     <!-- 时间轴主区域 -->
     <div class="timeline-container" ref="timelineContainerRef">
-      <!-- 波形加载动画 - 相对于 timeline-container 定位 -->
-      <div v-if="props.isGeneratingWaveform" class="waveform-loading-overlay">
-        <!-- 波形动画 -->
-        <div class="waveform-bars">
-          <div class="bar"></div>
-          <div class="bar"></div>
-          <div class="bar"></div>
-          <div class="bar"></div>
-          <div class="bar"></div>
+      <!-- 左侧轨道控制面板 -->
+      <div class="track-controls">
+        <!-- 时间刻度尺占位 + 交换按钮 -->
+        <div class="track-control-header">
+          <button 
+            class="track-swap-btn"
+            @click="toggleTrackOrder"
+            title="交换波形和字幕位置"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M7 16V4M7 4L3 8M7 4l4 4M17 8v12M17 20l4-4M17 20l-4-4"/>
+            </svg>
+          </button>
         </div>
-        <!-- 进度信息 -->
-        <div class="loading-info">
-          <span class="loading-text">生成波形</span>
-          <span class="loading-progress">{{ props.waveformProgress }}%</span>
+        <!-- 轨道控制区域 -->
+        <div class="track-control-items">
+          <!-- 波形轨道控制 -->
+          <div 
+            class="track-control-item waveform-control" 
+            :class="{ disabled: !showWaveform, 'has-separator': waveformOnTop }"
+            :style="{ order: waveformOnTop ? 1 : 2, height: '80px' }"
+          >
+            <button 
+              class="track-visibility-btn"
+              @click="showWaveform = !showWaveform"
+              :title="showWaveform ? '隐藏波形' : '显示波形'"
+            >
+              <svg v-if="showWaveform" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                <circle cx="12" cy="12" r="3"/>
+              </svg>
+              <svg v-else width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
+                <line x1="1" y1="1" x2="23" y2="23"/>
+              </svg>
+            </button>
+          </div>
+          <!-- 字幕轨道控制 -->
+          <div 
+            class="track-control-item subtitle-control" 
+            :class="{ disabled: !showSubtitles, 'has-separator': !waveformOnTop }"
+            :style="{ order: waveformOnTop ? 2 : 1, height: subtitleTrackHeight + 'px' }"
+          >
+            <button 
+              class="track-visibility-btn"
+              @click="showSubtitles = !showSubtitles"
+              :title="showSubtitles ? '隐藏字幕' : '显示字幕'"
+            >
+              <svg v-if="showSubtitles" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                <circle cx="12" cy="12" r="3"/>
+              </svg>
+              <svg v-else width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
+                <line x1="1" y1="1" x2="23" y2="23"/>
+              </svg>
+            </button>
+          </div>
         </div>
       </div>
-      <!-- 波形和字幕轨道 -->
-      <div class="timeline-track-area" ref="trackAreaRef" @scroll="handleScroll" @wheel="handleWheel">
+
+      <!-- 右侧主内容区域 -->
+      <div class="timeline-main-area">
+        <!-- 波形加载动画 - 相对于 timeline-container 定位 -->
+        <div v-if="props.isGeneratingWaveform" class="waveform-loading-overlay">
+          <!-- 波形动画 -->
+          <div class="waveform-bars">
+            <div class="bar"></div>
+            <div class="bar"></div>
+            <div class="bar"></div>
+            <div class="bar"></div>
+            <div class="bar"></div>
+          </div>
+          <!-- 进度信息 -->
+          <div class="loading-info">
+            <span class="loading-text">生成波形</span>
+            <span class="loading-progress">{{ props.waveformProgress }}%</span>
+          </div>
+        </div>
+        <!-- 波形和字幕轨道 -->
+        <div class="timeline-track-area" ref="trackAreaRef" @scroll="handleScroll" @wheel="handleWheel">
         <div class="timeline-content" :style="{ width: timelineWidth + 'px' }" @click="handleTimelineClick">
           <!-- 时间刻度尺 -->
           <div class="time-ruler" :style="{ width: timelineWidth + 'px' }">
@@ -41,24 +104,25 @@
             />
           </div>
 
-          <!-- 波形图 -->
-          <div class="waveform-layer" ref="waveformRef">
-            <!-- Canvas 波形渲染 -->
-            <canvas ref="waveformCanvasRef" class="waveform-canvas"></canvas>
-          </div>
+          <!-- 轨道容器 - 支持位置交换 -->
+          <div class="tracks-container" :class="{ 'reversed': !waveformOnTop }">
+            <!-- 波形图 -->
+            <div class="waveform-layer" :class="{ 'track-disabled': !showWaveform }" ref="waveformRef" :style="{ order: waveformOnTop ? 1 : 2 }">
+              <!-- Canvas 波形渲染 -->
+              <canvas ref="waveformCanvasRef" class="waveform-canvas"></canvas>
+              <!-- 悬浮高亮区域 - 显示字幕对应的波形范围 -->
+              <div
+                v-if="hoveredSubtitle && showWaveform"
+                class="subtitle-hover-highlight"
+                :style="{
+                  left: timeToPixel(timestampToSeconds(hoveredSubtitle.startTime)) + 'px',
+                  width: timeToPixel(timestampToSeconds(hoveredSubtitle.endTime) - timestampToSeconds(hoveredSubtitle.startTime)) + 'px'
+                }"
+              ></div>
+            </div>
 
-          <!-- 悬浮高亮区域 - 显示字幕对应的波形范围 -->
-          <div
-            v-if="hoveredSubtitle"
-            class="subtitle-hover-highlight"
-            :style="{
-              left: timeToPixel(timestampToSeconds(hoveredSubtitle.startTime)) + 'px',
-              width: timeToPixel(timestampToSeconds(hoveredSubtitle.endTime) - timestampToSeconds(hoveredSubtitle.startTime)) + 'px'
-            }"
-          ></div>
-
-          <!-- 字幕轨道 -->
-          <div class="subtitle-track" :class="{ 'scissor-mode': props.scissorMode }" :style="{ height: subtitleTrackHeight + 'px' }" @mousedown="handleTrackMouseDown">
+            <!-- 字幕轨道 -->
+            <div class="subtitle-track" :class="{ 'scissor-mode': props.scissorMode, 'track-disabled': !showSubtitles }" :style="{ height: subtitleTrackHeight + 'px', order: waveformOnTop ? 2 : 1 }" @mousedown="showSubtitles ? handleTrackMouseDown($event) : null">
             <div
               v-for="subtitle in visibleSubtitles"
               :key="subtitle.id"
@@ -112,6 +176,7 @@
               </div>
             </div>
           </div>
+          </div><!-- 轨道容器结束 -->
 
           <!-- 播放指针 -->
           <div
@@ -143,6 +208,7 @@
           </div>
         </div>
       </div>
+      </div><!-- timeline-main-area 结束 -->
     </div>
 
     <!-- 右键菜单 -->
@@ -246,7 +312,7 @@ const zoomRAF = ref<number | null>(null)
 
 // 计算字幕轨道的高度（基于轨道数量）
 const subtitleTrackHeight = computed(() => {
-  if (!props.subtitles || props.subtitles.length === 0) return 80
+  if (!props.subtitles || props.subtitles.length === 0) return 36
 
   // 找出最大的轨道号
   const maxTrackNumber = Math.max(
@@ -254,13 +320,12 @@ const subtitleTrackHeight = computed(() => {
     0
   )
 
-  // 轨道 0 从 top: 20px 开始，每条轨道高度 40px，间隙 2px
-  // 最后一条轨道的下边界 = 20 + (maxTrackNumber + 1) * 40 + maxTrackNumber * 2 + 20(底部padding)
-  const trackHeight = 40
+  // 轨道 0 从 top: 2px 开始，每条轨道高度 32px，间隙 2px
+  const trackHeight = 32
   const trackGap = 2
-  const totalHeight = 20 + (maxTrackNumber + 1) * trackHeight + maxTrackNumber * trackGap + 20
+  const totalHeight = 2 + (maxTrackNumber + 1) * trackHeight + maxTrackNumber * trackGap
 
-  return Math.max(totalHeight, 80)
+  return Math.max(totalHeight, 36)
 })
 
 // Selection state
@@ -314,6 +379,16 @@ const scissorLineX = ref<number | null>(null)
 
 // 悬浮高亮状态
 const hoveredSubtitle = ref<SubtitleEntry | null>(null)
+
+// 轨道控制状态
+const showWaveform = ref(true) // 波形轨道显示/隐藏
+const showSubtitles = ref(true) // 字幕轨道显示/隐藏
+const waveformOnTop = ref(true) // true: 波形在上，字幕在下；false: 字幕在上，波形在下
+
+// 切换轨道位置
+const toggleTrackOrder = () => {
+  waveformOnTop.value = !waveformOnTop.value
+}
 
 // 右键菜单状态
 const contextMenu = ref<{
@@ -606,9 +681,9 @@ const getSubtitleStyle = (subtitle: SubtitleEntry) => {
 
   // 根据轨道号计算垂直位置
   const trackNumber = subtitle.trackNumber ?? 0
-  const trackHeight = 40  // 每条轨道高度
+  const trackHeight = 32  // 每条轨道高度
   const trackGap = 2      // 轨道间隙
-  const top = 20 + (trackNumber * (trackHeight + trackGap))
+  const top = 2 + (trackNumber * (trackHeight + trackGap))
 
   return {
     left: left + 'px',
@@ -1943,14 +2018,125 @@ defineExpose({
 .timeline-container {
   flex: 1;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   min-height: 0;
+  position: relative;
+}
+
+/* 左侧轨道控制面板 */
+.track-controls {
+  width: 52px;
+  flex-shrink: 0;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  border-right: 1px solid #e2e8f0;
+  display: flex;
+  flex-direction: column;
+  z-index: 60;
+}
+
+.track-control-header {
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.track-control-items {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.track-control-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+/* 在视觉上第一个的控制项下方添加分隔线 */
+.track-control-item.has-separator {
+  border-bottom: 1px solid #e2e8f0;
+}
+
+/* 轨道控制按钮 - 与侧边栏按钮风格一致 */
+.track-visibility-btn {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  color: #94a3b8;
+  transition: all 0.2s ease;
+}
+
+.track-visibility-btn svg {
+  transition: all 0.2s ease;
+}
+
+.track-visibility-btn:hover {
+  background: #f1f5f9;
+}
+
+.track-visibility-btn:hover svg {
+  color: #64748b;
+}
+
+.track-control-item.disabled {
+  opacity: 0.6;
+}
+
+/* 交换按钮 - 与侧边栏按钮风格一致 */
+.track-swap-btn {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  color: #94a3b8;
+  transition: all 0.2s ease;
+}
+
+.track-swap-btn svg {
+  transition: all 0.2s ease;
+}
+
+.track-swap-btn:hover {
+  background: #f1f5f9;
+}
+
+.track-swap-btn:hover svg {
+  color: #64748b;
+}
+
+/* 轨道容器 - 支持 flexbox 排序 */
+.tracks-container {
+  display: flex;
+  flex-direction: column;
+}
+
+/* 右侧主内容区域 */
+.timeline-main-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
   position: relative;
 }
 
 /* 时间刻度尺 */
 .time-ruler {
-  height: 30px;
+  height: 24px;
   position: sticky;
   top: 0;
   background: #f8fafc;
@@ -1983,25 +2169,23 @@ defineExpose({
 }
 
 .time-label {
-  font-size: 11px;
+  font-size: 10px;
   color: #64748b;
-  line-height: 30px;
+  line-height: 24px;
   user-select: none;
 }
 
 /* 轨道区域 */
 .timeline-track-area {
   flex: 1;
-  overflow-x: auto;
+  overflow-x: overlay;
   overflow-y: hidden;
   position: relative;
-  min-height: 200px;
+  background: #f8fafc;
 }
 
 .timeline-content {
   position: relative;
-  height: 100%;
-  min-height: 200px;
 }
 
 /* 波形层 */
@@ -2011,6 +2195,22 @@ defineExpose({
   background: transparent;
   position: relative;
   overflow: visible;
+}
+
+/* 轨道禁用状态 - 覆盖灰色遮罩 */
+.waveform-layer.track-disabled {
+  pointer-events: none;
+}
+
+.waveform-layer.track-disabled::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(100, 116, 139, 0.4);
+  z-index: 10;
 }
 
 /* Canvas 波形 - 支持分段渲染动态定位 */
@@ -2080,11 +2280,11 @@ defineExpose({
   color: #3b82f6;
 }
 
-/* 悬浮高亮区域 - 显示字幕对应的波形范围（覆盖波形和字幕上方空白区域） */
+/* 悬浮高亮区域 - 显示字幕对应的波形范围 */
 .subtitle-hover-highlight {
   position: absolute;
-  top: 30px; /* 从时间刻度尺下方开始 */
-  height: 100px; /* 覆盖波形区域 + 字幕上方空白区域 */
+  top: 0;
+  height: 100%; /* 填满波形层 */
   background: linear-gradient(
     180deg,
     rgba(59, 130, 246, 0.12) 0%,
@@ -2098,24 +2298,38 @@ defineExpose({
 /* 字幕轨道 */
 .subtitle-track {
   width: 100%;
-  height: auto;
-  min-height: 80px;
   position: relative;
   background: #f8fafc;
-  border-top: 1px solid #e2e8f0;
   cursor: default;
   user-select: none;
   -webkit-user-select: none;
+  transition: opacity 0.2s ease, filter 0.2s ease;
 }
 
 .subtitle-track:active {
   cursor: crosshair;
 }
 
+/* 字幕轨道禁用状态 - 覆盖灰色遮罩 */
+.subtitle-track.track-disabled {
+  pointer-events: none;
+}
+
+.subtitle-track.track-disabled::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(100, 116, 139, 0.4);
+  z-index: 10;
+}
+
 /* 字幕块 */
 .subtitle-block {
   position: absolute;
-  height: 40px;
+  height: 32px;
   border-radius: 4px;
   border: 2px solid transparent;
   cursor: move;
@@ -2231,22 +2445,23 @@ defineExpose({
   border: 2px solid #ffffff;
 }
 
-/* 滚动条样式 */
+/* 滚动条样式 - 覆盖在内容上方 */
 .timeline-track-area::-webkit-scrollbar {
-  height: 10px;
+  height: 6px;
+  background: transparent;
 }
 
 .timeline-track-area::-webkit-scrollbar-track {
-  background: #f1f5f9;
+  background: transparent;
 }
 
 .timeline-track-area::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
-  border-radius: 5px;
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 3px;
 }
 
 .timeline-track-area::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+  background: rgba(0, 0, 0, 0.4);
 }
 
 /* 选择框 */
