@@ -269,102 +269,81 @@ const globalExportSubtitles = async (format: string) => {
     let positionX = 0
     let positionY = -415
     if (format === 'fcpxml') {
-      const fpsOptions = [
-        { value: 24, label: '24 fps', desc: '电影标准' },
-        { value: 25, label: '25 fps', desc: 'PAL 制式' },
-        { value: 30, label: '30 fps', desc: 'NTSC 制式' },
-        { value: 60, label: '60 fps', desc: '高帧率' },
-      ]
-      
       // 创建一个 Promise 来处理用户选择
       const result = await new Promise<{ fps: number; posX: number; posY: number } | null>((resolve) => {
         // 创建对话框容器
         const container = document.createElement('div')
-        container.className = 'fps-dialog-overlay'
+        container.className = 'export-dialog-overlay'
         container.innerHTML = `
-          <div class="fps-dialog-backdrop"></div>
-          <div class="fps-dialog-content">
-            <div class="fps-dialog-header">
-              <span class="fps-dialog-title">导出 FCPXML</span>
-              <button class="fps-dialog-close" type="button">×</button>
+          <div class="export-dialog-backdrop"></div>
+          <div class="export-dialog-content">
+            <div class="export-dialog-header">
+              <span class="export-dialog-title">导出 FCPXML</span>
+              <button class="export-dialog-close" type="button">×</button>
             </div>
-            <div class="fps-dialog-body">
-              <p class="fps-hint">请选择视频帧率：</p>
-              <div class="fps-options">
-                ${fpsOptions.map(opt => `
-                  <label class="fps-option${opt.value === 25 ? ' selected' : ''}" data-value="${opt.value}">
-                    <div class="fps-option-content">
-                      <span class="fps-label">${opt.label}</span>
-                      <span class="fps-desc">${opt.desc}</span>
-                    </div>
-                    <svg class="fps-check" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                      <polyline points="20 6 9 17 4 12"/>
-                    </svg>
-                  </label>
-                `).join('')}
+            <div class="export-dialog-body">
+              <div class="export-form-row">
+                <label class="export-form-label">帧率</label>
+                <select id="fcpxml-fps" class="export-select">
+                  <option value="24">24 fps (电影)</option>
+                  <option value="25" selected>25 fps (PAL)</option>
+                  <option value="30">30 fps (NTSC)</option>
+                  <option value="60">60 fps (高帧率)</option>
+                </select>
               </div>
-              <div class="fps-position-section">
-                <p class="fps-hint">字幕位置：</p>
-                <div class="fps-position-inputs">
-                  <div class="fps-position-input">
-                    <label>X</label>
-                    <input type="number" id="fcpxml-pos-x" value="0" />
-                    <span>px</span>
+              <div class="export-form-row">
+                <label class="export-form-label">字幕位置</label>
+                <div class="export-position-inputs">
+                  <div class="export-input-group">
+                    <span class="export-input-prefix">X</span>
+                    <input type="number" id="fcpxml-pos-x" value="0" class="export-input" />
+                    <span class="export-input-suffix">px</span>
                   </div>
-                  <div class="fps-position-input">
-                    <label>Y</label>
-                    <input type="number" id="fcpxml-pos-y" value="-415" />
-                    <span>px</span>
+                  <div class="export-input-group">
+                    <span class="export-input-prefix">Y</span>
+                    <input type="number" id="fcpxml-pos-y" value="-415" class="export-input" />
+                    <span class="export-input-suffix">px</span>
                   </div>
                 </div>
               </div>
             </div>
-            <div class="fps-dialog-footer">
-              <button class="fps-btn fps-btn-cancel" type="button">取消</button>
-              <button class="fps-btn fps-btn-confirm" type="button">导出</button>
+            <div class="export-dialog-footer">
+              <button class="export-btn export-btn-cancel" type="button">取消</button>
+              <button class="export-btn export-btn-confirm" type="button">导出</button>
             </div>
           </div>
         `
         document.body.appendChild(container)
         
-        let currentFps = 25
-        
-        // 绑定选项点击事件
-        container.querySelectorAll('.fps-option').forEach(option => {
-          option.addEventListener('click', () => {
-            container.querySelectorAll('.fps-option').forEach(o => o.classList.remove('selected'))
-            option.classList.add('selected')
-            currentFps = parseInt(option.getAttribute('data-value') || '25')
-          })
-        })
-        
-        const getPositionValues = () => {
+        const getValues = () => {
+          const fpsSelect = container.querySelector('#fcpxml-fps') as HTMLSelectElement
           const posXInput = container.querySelector('#fcpxml-pos-x') as HTMLInputElement
           const posYInput = container.querySelector('#fcpxml-pos-y') as HTMLInputElement
           return {
+            fps: parseInt(fpsSelect?.value || '25'),
             posX: parseInt(posXInput?.value || '0'),
             posY: parseInt(posYInput?.value || '-415'),
           }
         }
         
         // 绑定按钮事件
-        container.querySelector('.fps-btn-cancel')?.addEventListener('click', () => {
+        container.querySelector('.export-btn-cancel')?.addEventListener('click', () => {
           document.body.removeChild(container)
           resolve(null)
         })
         
-        container.querySelector('.fps-dialog-close')?.addEventListener('click', () => {
+        container.querySelector('.export-dialog-close')?.addEventListener('click', () => {
           document.body.removeChild(container)
           resolve(null)
         })
         
-        container.querySelector('.fps-btn-confirm')?.addEventListener('click', () => {
-          const { posX, posY } = getPositionValues()
+        container.querySelector('.export-btn-confirm')?.addEventListener('click', () => {
+          const values = getValues()
           document.body.removeChild(container)
-          resolve({ fps: currentFps, posX, posY })
+          resolve(values)
         })
         
-        container.querySelector('.fps-dialog-backdrop')?.addEventListener('click', () => {
+        container.querySelector('.export-dialog-backdrop')?.addEventListener('click', () => {
           document.body.removeChild(container)
           resolve(null)
         })
@@ -408,6 +387,85 @@ const globalExportSubtitles = async (format: string) => {
     const { ElMessage } = await import('element-plus')
     ElMessage.error(`导出失败：${error instanceof Error ? error.message : String(error)}`)
     logger.error('导出字幕失败', { format, error: String(error) })
+  }
+}
+
+// 全局显示导出格式选择对话框（Cmd+E）
+const globalShowExportDialog = async () => {
+  try {
+    const { useSubtitleStore } = await import('./stores/subtitle')
+    const { ElMessage } = await import('element-plus')
+    const store = useSubtitleStore()
+    
+    if (store.entries.length === 0) {
+      ElMessage.warning('没有字幕内容可导出')
+      return
+    }
+    
+    const exportFormats = [
+      { value: 'txt', label: 'TXT', desc: '纯文本格式' },
+      { value: 'vtt', label: 'VTT', desc: 'WebVTT 字幕' },
+      { value: 'srt', label: 'SRT', desc: 'SRT 字幕' },
+      { value: 'markdown', label: 'Markdown', desc: '带时间戳的文档' },
+      { value: 'fcpxml', label: 'FCPXML', desc: 'Final Cut Pro' },
+    ]
+    
+    // 创建格式选择对话框
+    const selectedFormat = await new Promise<string | null>((resolve) => {
+      const container = document.createElement('div')
+      container.className = 'export-dialog-overlay'
+      container.innerHTML = `
+        <div class="export-dialog-backdrop"></div>
+        <div class="export-dialog-content">
+          <div class="export-dialog-header">
+            <span class="export-dialog-title">导出字幕</span>
+            <button class="export-dialog-close" type="button">×</button>
+          </div>
+          <div class="export-dialog-body">
+            <div class="export-form-row">
+              <label class="export-form-label">导出格式</label>
+              <select id="export-format" class="export-select">
+                ${exportFormats.map(fmt => `<option value="${fmt.value}">${fmt.label} - ${fmt.desc}</option>`).join('')}
+              </select>
+            </div>
+          </div>
+          <div class="export-dialog-footer">
+            <button class="export-btn export-btn-cancel" type="button">取消</button>
+            <button class="export-btn export-btn-confirm" type="button">导出</button>
+          </div>
+        </div>
+      `
+      document.body.appendChild(container)
+      
+      // 绑定按钮事件
+      container.querySelector('.export-btn-cancel')?.addEventListener('click', () => {
+        document.body.removeChild(container)
+        resolve(null)
+      })
+      
+      container.querySelector('.export-dialog-close')?.addEventListener('click', () => {
+        document.body.removeChild(container)
+        resolve(null)
+      })
+      
+      container.querySelector('.export-btn-confirm')?.addEventListener('click', () => {
+        const select = container.querySelector('#export-format') as HTMLSelectElement
+        document.body.removeChild(container)
+        resolve(select?.value || 'txt')
+      })
+      
+      container.querySelector('.export-dialog-backdrop')?.addEventListener('click', () => {
+        document.body.removeChild(container)
+        resolve(null)
+      })
+    })
+    
+    if (selectedFormat) {
+      // 调用对应格式的导出函数
+      await globalExportSubtitles(selectedFormat)
+    }
+  } catch (error) {
+    logger.error('显示导出对话框失败', { error: String(error) })
   }
 }
 
@@ -477,6 +535,7 @@ const updateRecentFilesMenu = async () => {
 ;(window as any).__globalOpenRecentFile = globalOpenRecentFile
 ;(window as any).__globalCloseCurrentTab = globalCloseCurrentTab
 ;(window as any).__globalExportSubtitles = globalExportSubtitles
+;(window as any).__globalShowExportDialog = globalShowExportDialog
 ;(window as any).__updateRecentFilesMenu = updateRecentFilesMenu
 
 // 全局菜单事件监听器（在应用启动时注册）

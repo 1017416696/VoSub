@@ -404,19 +404,9 @@ fn update_recent_files_menu(app_handle: tauri::AppHandle, files: Vec<RecentFileI
                 .build()
                 .map_err(|e| e.to_string())?;
 
-            // 创建导出子菜单
-            let export_menu = SubmenuBuilder::new(&app_handle, "导出")
-                .text("export-txt", "导出为 TXT")
-                .text("export-vtt", "导出为 VTT")
-                .text("export-srt", "导出为 SRT")
-                .text("export-markdown", "导出为 Markdown")
-                .separator()
-                .text("export-fcpxml", "导出为 FCPXML...")
-                .build()
-                .map_err(|e| e.to_string())?;
-
             let open_item = MenuItem::with_id(&app_handle, "open", "打开", true, Some("CmdOrCtrl+O")).map_err(|e| e.to_string())?;
             let save_item = MenuItem::with_id(&app_handle, "save", "保存", true, Some("CmdOrCtrl+S")).map_err(|e| e.to_string())?;
+            let export_dialog_item = MenuItem::with_id(&app_handle, "export-dialog", "导出", true, Some("Cmd+E")).map_err(|e| e.to_string())?;
             let close_tab_item = MenuItem::with_id(&app_handle, "close-tab", "关闭标签页", true, Some("CmdOrCtrl+W")).map_err(|e| e.to_string())?;
             let close_window_item = MenuItem::with_id(&app_handle, "close-window", "关闭窗口", true, Some("Cmd+Q")).map_err(|e| e.to_string())?;
             let add_dict_item = MenuItem::with_id(&app_handle, "add-to-dictionary", "添加到本地词典", true, Some("Cmd+D")).map_err(|e| e.to_string())?;
@@ -424,7 +414,7 @@ fn update_recent_files_menu(app_handle: tauri::AppHandle, files: Vec<RecentFileI
                 .item(&open_item)
                 .item(&recent_menu)
                 .item(&save_item)
-                .item(&export_menu)
+                .item(&export_dialog_item)
                 .separator()
                 .item(&close_tab_item)
                 .item(&close_window_item)
@@ -467,19 +457,9 @@ fn update_recent_files_menu(app_handle: tauri::AppHandle, files: Vec<RecentFileI
         {
             use tauri::menu::{MenuItem, PredefinedMenuItem};
             
-            // 创建导出子菜单
-            let export_menu = SubmenuBuilder::new(&app_handle, "导出")
-                .text("export-txt", "导出为 TXT")
-                .text("export-vtt", "导出为 VTT")
-                .text("export-srt", "导出为 SRT")
-                .text("export-markdown", "导出为 Markdown")
-                .separator()
-                .text("export-fcpxml", "导出为 FCPXML...")
-                .build()
-                .map_err(|e| e.to_string())?;
-
             let open_item = MenuItem::with_id(&app_handle, "open", "打开", true, Some("CmdOrCtrl+O")).map_err(|e| e.to_string())?;
             let save_item = MenuItem::with_id(&app_handle, "save", "保存", true, Some("CmdOrCtrl+S")).map_err(|e| e.to_string())?;
+            let export_dialog_item = MenuItem::with_id(&app_handle, "export-dialog", "导出", true, Some("Ctrl+E")).map_err(|e| e.to_string())?;
             let close_tab_item = MenuItem::with_id(&app_handle, "close-tab", "关闭标签页", true, Some("CmdOrCtrl+W")).map_err(|e| e.to_string())?;
             let close_window_item = MenuItem::with_id(&app_handle, "close-window", "关闭窗口", true, Some("Alt+F4")).map_err(|e| e.to_string())?;
             let add_dict_item = MenuItem::with_id(&app_handle, "add-to-dictionary", "添加到本地词典", true, Some("Ctrl+D")).map_err(|e| e.to_string())?;
@@ -487,7 +467,7 @@ fn update_recent_files_menu(app_handle: tauri::AppHandle, files: Vec<RecentFileI
                 .item(&open_item)
                 .item(&recent_menu)
                 .item(&save_item)
-                .item(&export_menu)
+                .item(&export_dialog_item)
                 .separator()
                 .item(&close_tab_item)
                 .item(&close_window_item)
@@ -594,6 +574,7 @@ pub fn run() {
                 // 创建 文件 菜单（macOS 使用 Cmd）
                 let open_item = MenuItem::with_id(app, "open", "打开", true, Some("CmdOrCtrl+O"))?;
                 let save_item = MenuItem::with_id(app, "save", "保存", true, Some("CmdOrCtrl+S"))?;
+                let export_dialog_item = MenuItem::with_id(app, "export-dialog", "导出...", true, Some("Cmd+E"))?;
                 let close_tab_item = MenuItem::with_id(app, "close-tab", "关闭标签页", true, Some("CmdOrCtrl+W"))?;
                 let close_window_item = MenuItem::with_id(app, "close-window", "关闭窗口", true, Some("Cmd+Q"))?;
                 let add_dict_item = MenuItem::with_id(app, "add-to-dictionary", "添加到本地词典", true, Some("Cmd+D"))?;
@@ -601,6 +582,7 @@ pub fn run() {
                     .item(&open_item)
                     .item(&recent_menu)
                     .item(&save_item)
+                    .item(&export_dialog_item)
                     .item(&export_menu)
                     .separator()
                     .item(&close_tab_item)
@@ -662,6 +644,7 @@ pub fn run() {
                 // 创建 文件 菜单（Windows 使用 Ctrl）
                 let open_item = MenuItem::with_id(app, "open", "打开", true, Some("CmdOrCtrl+O"))?;
                 let save_item = MenuItem::with_id(app, "save", "保存", true, Some("CmdOrCtrl+S"))?;
+                let export_dialog_item = MenuItem::with_id(app, "export-dialog", "导出...", true, Some("Ctrl+E"))?;
                 let close_tab_item = MenuItem::with_id(app, "close-tab", "关闭标签页", true, Some("CmdOrCtrl+W"))?;
                 let close_window_item = MenuItem::with_id(app, "close-window", "关闭窗口", true, Some("Alt+F4"))?;
                 let add_dict_item = MenuItem::with_id(app, "add-to-dictionary", "添加到本地词典", true, Some("Ctrl+D"))?;
@@ -669,6 +652,7 @@ pub fn run() {
                     .item(&open_item)
                     .item(&recent_menu)
                     .item(&save_item)
+                    .item(&export_dialog_item)
                     .item(&export_menu)
                     .separator()
                     .item(&close_tab_item)
@@ -860,6 +844,19 @@ pub fn run() {
                                 }})();
                             "#, index);
                             let _ = window.eval(&js_code);
+                        }
+                    }
+                    // 导出对话框（Cmd+E）
+                    "export-dialog" => {
+                        if let Some(window) = app_handle.get_webview_window("main") {
+                            let js_code = r#"
+                                (async () => {
+                                    if (window.__globalShowExportDialog && typeof window.__globalShowExportDialog === 'function') {
+                                        await window.__globalShowExportDialog();
+                                    }
+                                })();
+                            "#;
+                            let _ = window.eval(js_code);
                         }
                     }
                     // 导出功能

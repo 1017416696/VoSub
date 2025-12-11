@@ -307,3 +307,210 @@ input, textarea {
 .fps-btn-confirm:hover {
   background: #66b1ff;
 }
+
+
+/* 紧凑导出对话框样式 */
+.export-dialog-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.export-dialog-backdrop {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.4);
+}
+
+.export-dialog-content {
+  position: relative;
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
+  width: 320px;
+  max-width: 90vw;
+  animation: export-dialog-in 0.15s ease-out;
+}
+
+@keyframes export-dialog-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.export-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid #eee;
+}
+
+.export-dialog-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #303133;
+}
+
+.export-dialog-close {
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  font-size: 18px;
+  color: #909399;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.export-dialog-close:hover {
+  background: #f5f5f5;
+  color: #606266;
+}
+
+.export-dialog-body {
+  padding: 16px;
+}
+
+.export-form-row {
+  margin-bottom: 14px;
+}
+
+.export-form-row:last-child {
+  margin-bottom: 0;
+}
+
+.export-form-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: #606266;
+  margin-bottom: 6px;
+}
+
+.export-select {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid #dcdfe6;
+  border-radius: 6px;
+  font-size: 14px;
+  color: #303133;
+  background: #fff;
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23909399' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 32px;
+}
+
+.export-select:focus {
+  outline: none;
+  border-color: #409eff;
+}
+
+.export-position-inputs {
+  display: flex;
+  gap: 12px;
+}
+
+.export-input-group {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  border: 1px solid #dcdfe6;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.export-input-group:focus-within {
+  border-color: #409eff;
+}
+
+.export-input-prefix {
+  padding: 0 10px;
+  font-size: 13px;
+  color: #909399;
+  background: #f5f7fa;
+  height: 34px;
+  line-height: 34px;
+  border-right: 1px solid #dcdfe6;
+}
+
+.export-input {
+  flex: 1;
+  border: none;
+  padding: 8px 10px;
+  font-size: 14px;
+  color: #303133;
+  background: #fff;
+  width: 100%;
+  margin: 0;
+}
+
+.export-input:focus {
+  outline: none;
+}
+
+.export-input-suffix {
+  padding: 0 10px;
+  font-size: 13px;
+  color: #909399;
+  background: #f5f7fa;
+  height: 34px;
+  line-height: 34px;
+  border-left: 1px solid #dcdfe6;
+}
+
+.export-dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid #eee;
+}
+
+.export-btn {
+  padding: 7px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+  border: none;
+}
+
+.export-btn-cancel {
+  background: #f5f5f5;
+  color: #606266;
+}
+
+.export-btn-cancel:hover {
+  background: #e8e8e8;
+}
+
+.export-btn-confirm {
+  background: #409eff;
+  color: #fff;
+}
+
+.export-btn-confirm:hover {
+  background: #66b1ff;
+}
