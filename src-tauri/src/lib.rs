@@ -68,21 +68,21 @@ fn read_audio_file(file_path: String) -> Result<String, String> {
 /// target_samples: number of data points to generate (default: 2000)
 #[tauri::command]
 async fn generate_audio_waveform(
-    window: tauri::Window,
+    app_handle: tauri::AppHandle,
     file_path: String,
     target_samples: Option<usize>,
 ) -> Result<Vec<f32>, String> {
     let samples = target_samples.unwrap_or(2000);
     
     let (tx, rx) = std::sync::mpsc::channel();
-    let window_clone = window.clone();
+    let app_handle_clone = app_handle.clone();
     let file_path_clone = file_path.clone();
     
     // 在后台线程执行波形生成
     std::thread::spawn(move || {
-        let window_for_callback = window_clone.clone();
+        let app_for_callback = app_handle_clone.clone();
         let callback: ProgressCallback = Box::new(move |progress| {
-            let _ = window_for_callback.emit("waveform-progress", progress);
+            let _ = app_for_callback.emit("waveform-progress", progress);
         });
         
         let result = generate_waveform_with_progress(&file_path_clone, samples, Some(callback));

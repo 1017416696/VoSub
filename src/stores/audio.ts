@@ -522,7 +522,6 @@ export const useAudioStore = defineStore('audio', () => {
   // 生成波形数据
   const generateWaveform = async (filePath: string) => {
     const waveformStartTime = Date.now()
-
     if (!isGeneratingWaveform.value) {
       isGeneratingWaveform.value = true
     }

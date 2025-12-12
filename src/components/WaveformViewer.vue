@@ -78,7 +78,8 @@
           <!-- 进度信息 -->
           <div class="loading-info">
             <span class="loading-text">生成波形</span>
-            <span class="loading-progress">{{ props.waveformProgress }}%</span>
+            <!-- Windows 上不显示百分比，因为 WebView2 渲染批处理导致进度显示不准确 -->
+            <span v-if="!isWindows" class="loading-progress">{{ props.waveformProgress }}%</span>
           </div>
         </div>
         <!-- 波形和字幕轨道 -->
@@ -276,6 +277,9 @@ const props = withDefaults(defineProps<Props>(), {
   scissorMode: false,
   snapEnabled: false
 })
+
+// Detect Windows platform (WebView2 has rendering batching issues with fast progress updates)
+const isWindows = navigator.platform.toLowerCase().includes('win')
 
 // 计算属性，用于调试
 const emit = defineEmits<{

@@ -90,6 +90,11 @@ pub fn generate_waveform_minmax_with_progress(
     // Get total frames for progress calculation (if available)
     let total_frames = track.codec_params.n_frames;
     let sample_rate = track.codec_params.sample_rate.unwrap_or(44100);
+    let channels = track.codec_params.channels.map(|c| c.count()).unwrap_or(2);
+    
+    // Try to get duration from track time base
+    let duration_from_track = track.codec_params.time_base
+        .and_then(|tb| track.codec_params.n_frames.map(|f| f as f64 * tb.numer as f64 / tb.denom as f64));
 
     // Create a decoder for the track
     let dec_opts = DecoderOptions::default();
@@ -97,12 +102,21 @@ pub fn generate_waveform_minmax_with_progress(
         .make(&track.codec_params, &dec_opts)
         .map_err(|e| format!("Failed to create decoder: {}", e))?;
 
-    // Estimate total samples based on file size or duration
+    // Estimate total samples based on available information
+    // Priority: n_frames > duration calculation > file size estimate
     let estimated_total_samples = if let Some(frames) = total_frames {
         frames as usize
+    } else if let Some(duration) = duration_from_track {
+        (duration * sample_rate as f64) as usize
     } else {
-        // Rough estimate: assume ~10 bytes per sample for compressed audio
-        (file_size as usize / 10).max(sample_rate as usize * 60)
+        // For compressed audio (MP3, AAC, etc.), estimate based on bitrate
+        // Typical MP3: 128-320 kbps, let's assume ~192 kbps average
+        // 192 kbps = 24000 bytes/sec, so duration ≈ file_size / 24000
+        // samples = duration * sample_rate
+        let estimated_duration_secs = file_size as f64 / 24000.0;
+        let estimated = (estimated_duration_secs * sample_rate as f64) as usize;
+        // Ensure minimum reasonable estimate (at least 1 second of audio)
+        estimated.max(sample_rate as usize)
     };
 
     // Pre-allocate with estimated capacity to reduce reallocations
@@ -111,6 +125,17 @@ pub fn generate_waveform_minmax_with_progress(
     let mut last_progress_time = Instant::now();
     let mut last_reported_progress = 0.0f32;
 
+    // Track packet count for progress updates
+    let mut packet_count: u64 = 0;
+    
+    // Calculate update interval based on estimated total packets
+    // Aim for ~100 progress updates during decoding (every 1%)
+    let estimated_packets = (estimated_total_samples / 1152).max(100) as u64; // MP3 typically has 1152 samples per frame
+    let packet_update_interval = (estimated_packets / 100).max(1);
+    
+    // Minimum time between progress updates (50ms, gives Windows WebView2 time to render)
+    const MIN_PROGRESS_INTERVAL_MS: u128 = 50;
+    
     // Decode packets
     loop {
         let packet = match format.next_packet() {
@@ -123,6 +148,8 @@ pub fn generate_waveform_minmax_with_progress(
             continue;
         }
 
+        packet_count += 1;
+
         // Decode the packet
         match decoder.decode(&packet) {
             Ok(decoded) => {
@@ -131,17 +158,21 @@ pub fn generate_waveform_minmax_with_progress(
                 all_samples.extend(samples);
                 decoded_frames += num_samples as u64;
 
-                // Update progress (throttle to max 10 updates per second)
+                // Update progress based on packet count interval AND time interval
+                // This ensures UI has time to render between updates
                 if let Some(ref callback) = progress_callback {
                     let now = Instant::now();
-                    if now.duration_since(last_progress_time).as_millis() >= 100 {
+                    let time_since_last = now.duration_since(last_progress_time).as_millis();
+                    
+                    if packet_count % packet_update_interval == 0 && time_since_last >= MIN_PROGRESS_INTERVAL_MS {
                         let progress = if let Some(total) = total_frames {
                             (decoded_frames as f32 / total as f32 * 0.9).min(0.9)
                         } else {
                             (decoded_frames as f32 / estimated_total_samples as f32 * 0.9).min(0.9)
                         };
 
-                        if progress > last_reported_progress + 0.01 {
+                        // Only update if progress actually increased
+                        if progress > last_reported_progress {
                             callback(progress);
                             last_reported_progress = progress;
                             last_progress_time = now;
