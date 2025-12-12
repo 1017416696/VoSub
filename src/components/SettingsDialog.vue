@@ -238,6 +238,7 @@ interface SenseVoiceEnvStatus {
   uv_installed: boolean
   env_exists: boolean
   ready: boolean
+  is_gpu: boolean  // 是否安装了 GPU 版本
 }
 
 // SenseVoice 模型信息
@@ -261,7 +262,8 @@ const downloadProgress = ref(0)
 const downloadMessage = ref('')
 
 // SenseVoice 相关
-const sensevoiceStatus = ref<SenseVoiceEnvStatus>({ uv_installed: false, env_exists: false, ready: false })
+const sensevoiceStatus = ref<SenseVoiceEnvStatus>({ uv_installed: false, env_exists: false, ready: false, is_gpu: false })
+const sensevoiceUseGpu = ref(false)  // 是否安装 GPU 版本
 const sensevoiceModels = ref<SenseVoiceModelInfo[]>([])
 const downloadingSensevoiceModel = ref<string | null>(null)
 const sensevoiceModelProgress = ref(0)
@@ -326,7 +328,8 @@ const installSensevoice = async () => {
   
   isInstallingSensevoice.value = true
   sensevoiceProgress.value = 0
-  sensevoiceMessage.value = '准备安装...'
+  const versionType = sensevoiceUseGpu.value ? 'GPU' : 'CPU'
+  sensevoiceMessage.value = `准备安装 ${versionType} 版本...`
   
   // 监听安装进度
   const unlisten = await listen<{ progress: number; current_text: string }>('sensevoice-progress', (event) => {
@@ -335,9 +338,9 @@ const installSensevoice = async () => {
   })
   
   try {
-    await invoke('install_sensevoice')
+    await invoke('install_sensevoice', { useGpu: sensevoiceUseGpu.value })
     await fetchSensevoiceStatus()
-    ElMessage.success('SenseVoice 环境安装成功')
+    ElMessage.success(`SenseVoice ${versionType} 版本安装成功`)
   } catch (error) {
     ElMessage.error(`安装失败：${error instanceof Error ? error.message : '未知错误'}`)
   } finally {
@@ -361,6 +364,64 @@ const uninstallSensevoice = async () => {
     if (e !== 'cancel') {
       ElMessage.error(`卸载失败：${e instanceof Error ? e.message : '未知错误'}`)
     }
+  }
+}
+
+// 切换 SenseVoice 版本（CPU <-> GPU）
+const switchSensevoiceVersion = async () => {
+  const currentVersion = sensevoiceStatus.value.is_gpu ? 'GPU' : 'CPU'
+  const targetVersion = sensevoiceStatus.value.is_gpu ? 'CPU' : 'GPU'
+  const sizeHint = sensevoiceStatus.value.is_gpu
+    ? '约 200MB'
+    : '约 2.5GB，需要 NVIDIA 显卡和 CUDA'
+
+  try {
+    await ElMessageBox.confirm(
+      `确定要从 ${currentVersion} 版本切换到 ${targetVersion} 版本吗？\n\n这将卸载当前环境并重新安装（${sizeHint}）。\n模型文件会保留，无需重新下载。`,
+      '切换版本',
+      {
+        confirmButtonText: `切换到 ${targetVersion}`,
+        cancelButtonText: '取消',
+        type: 'info',
+      }
+    )
+
+    // 记录目标版本（在卸载前记录，因为卸载后状态会变）
+    const useGpu = !sensevoiceStatus.value.is_gpu
+
+    // 先卸载
+    isInstallingSensevoice.value = true
+    sensevoiceProgress.value = 0
+    sensevoiceMessage.value = '正在卸载当前环境...'
+
+    await invoke('uninstall_sensevoice')
+    await fetchSensevoiceStatus() // 更新状态
+
+    // 再安装新版本
+    sensevoiceMessage.value = `正在安装 ${targetVersion} 版本...`
+
+    const unlisten = await listen<{ progress: number; current_text: string }>(
+      'sensevoice-progress',
+      (event) => {
+        sensevoiceProgress.value = event.payload.progress
+        sensevoiceMessage.value = event.payload.current_text
+      }
+    )
+
+    try {
+      await invoke('install_sensevoice', { useGpu })
+      await fetchSensevoiceStatus()
+      ElMessage.success(`已切换到 ${targetVersion} 版本`)
+    } finally {
+      unlisten()
+    }
+  } catch (e) {
+    if (e !== 'cancel') {
+      ElMessage.error(`切换失败：${e instanceof Error ? e.message : '未知错误'}`)
+    }
+  } finally {
+    isInstallingSensevoice.value = false
+    await fetchSensevoiceStatus()
   }
 }
 
@@ -964,7 +1025,7 @@ const shortcutCategories = computed(() => {
                   </div>
                   <div class="engine-status">
                     <span class="status-badge" :class="{ ready: sensevoiceStatus.ready, pending: !sensevoiceStatus.ready }">
-                      {{ sensevoiceStatus.ready ? '已就绪' : (sensevoiceStatus.env_exists ? '依赖不完整' : '未安装') }}
+                      {{ sensevoiceStatus.ready ? (sensevoiceStatus.is_gpu ? 'GPU 版本' : 'CPU 版本') : (sensevoiceStatus.env_exists ? '依赖不完整' : '未安装') }}
                     </span>
                   </div>
                 </div>
@@ -983,12 +1044,18 @@ const shortcutCategories = computed(() => {
                 
                 <div class="engine-content">
                   <template v-if="!sensevoiceStatus.ready">
+                    <div class="install-options">
+                      <el-checkbox v-model="sensevoiceUseGpu" :disabled="isInstallingSensevoice">
+                        安装 GPU 加速版本
+                      </el-checkbox>
+                      <span class="install-hint">{{ sensevoiceUseGpu ? '需要 NVIDIA 显卡和 CUDA，下载约 2.5GB' : 'CPU 版本，下载约 200MB' }}</span>
+                    </div>
                     <el-button 
                       type="primary" 
                       :disabled="isInstallingSensevoice || !sensevoiceStatus.uv_installed"
                       @click="installSensevoice"
                     >
-                      {{ isInstallingSensevoice ? '安装中...' : '安装环境' }}
+                      {{ isInstallingSensevoice ? '安装中...' : (sensevoiceUseGpu ? '安装 GPU 版本' : '安装 CPU 版本') }}
                     </el-button>
                   </template>
                   <template v-else>
@@ -1053,8 +1120,17 @@ const shortcutCategories = computed(() => {
                         </template>
                       </div>
                     </div>
-                    <!-- 卸载环境按钮 -->
+                    <!-- 环境操作按钮 -->
                     <div class="env-actions">
+                      <el-button 
+                        size="small" 
+                        type="primary" 
+                        plain 
+                        @click="switchSensevoiceVersion"
+                        :disabled="isInstallingSensevoice"
+                      >
+                        {{ sensevoiceStatus.is_gpu ? '切换到 CPU 版本' : '切换到 GPU 版本' }}
+                      </el-button>
                       <el-button size="small" type="danger" plain @click="uninstallSensevoice">卸载环境</el-button>
                     </div>
                   </template>
@@ -2126,6 +2202,22 @@ const shortcutCategories = computed(() => {
   font-size: 12px;
   color: #909399;
   margin-top: 8px;
+}
+
+/* 安装选项 */
+.install-options {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding: 10px 14px;
+  background: #f6f8fa;
+  border-radius: 8px;
+}
+
+.install-hint {
+  font-size: 12px;
+  color: #909399;
 }
 
 /* 模型网格 */

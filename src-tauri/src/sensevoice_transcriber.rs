@@ -37,6 +37,7 @@ pub struct SenseVoiceEnvStatus {
     pub uv_installed: bool,
     pub env_exists: bool,
     pub ready: bool,
+    pub is_gpu: bool,  // 是否安装了 GPU 版本
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -507,6 +508,19 @@ fn get_uv_path() -> Option<PathBuf> {
     }
 }
 
+/// 获取 GPU 标记文件路径
+fn get_gpu_marker_path() -> Result<PathBuf, String> {
+    let env_dir = get_sensevoice_env_dir()?;
+    Ok(env_dir.join(".gpu_version"))
+}
+
+/// 检查是否安装了 GPU 版本
+fn is_gpu_version_installed() -> bool {
+    get_gpu_marker_path()
+        .map(|p| p.exists())
+        .unwrap_or(false)
+}
+
 /// 检查 SenseVoice 环境状态（快速检查，不启动 Python）
 pub fn check_sensevoice_env() -> SenseVoiceEnvStatus {
     let uv_installed = check_uv_installed();
@@ -552,16 +566,25 @@ pub fn check_sensevoice_env() -> SenseVoiceEnvStatus {
         false
     };
     
+    // 检查是否是 GPU 版本
+    let is_gpu = if ready {
+        is_gpu_version_installed()
+    } else {
+        false
+    };
+    
     SenseVoiceEnvStatus {
         uv_installed,
         env_exists,
         ready,
+        is_gpu,
     }
 }
 
 
 /// 安装 SenseVoice 环境
-pub async fn install_sensevoice_env(window: Window) -> Result<String, String> {
+/// use_gpu: 是否安装 GPU 版本（需要 NVIDIA 显卡和 CUDA）
+pub async fn install_sensevoice_env(window: Window, use_gpu: bool) -> Result<String, String> {
     reset_cancellation();
     
     // 获取 uv 路径
@@ -570,10 +593,12 @@ pub async fn install_sensevoice_env(window: Window) -> Result<String, String> {
     
     let env_dir = get_sensevoice_env_dir()?;
     
+    let version_type = if use_gpu { "GPU" } else { "CPU" };
+    
     // 发送进度
     let _ = window.emit("sensevoice-progress", SenseVoiceProgress {
         progress: 10.0,
-        current_text: "正在创建 Python 虚拟环境...".to_string(),
+        current_text: format!("正在创建 Python 虚拟环境（{} 版本）...", version_type),
         status: "installing".to_string(),
     });
     
@@ -599,21 +624,36 @@ pub async fn install_sensevoice_env(window: Window) -> Result<String, String> {
     // 发送进度
     let _ = window.emit("sensevoice-progress", SenseVoiceProgress {
         progress: 30.0,
-        current_text: "正在安装 PyTorch（可能需要几分钟）...".to_string(),
+        current_text: format!("正在安装 PyTorch {} 版本（可能需要几分钟）...", version_type),
         status: "installing".to_string(),
     });
     
-    // 安装 PyTorch (CPU 版本，体积较小)
     let python_path = get_python_path()?;
-    let output = Command::new(&uv_path)
-        .args([
-            "pip", "install",
-            "--python", python_path.to_str().unwrap(),
-            "torch", "torchaudio",
-            "--index-url", "https://download.pytorch.org/whl/cpu"
-        ])
-        .output()
-        .map_err(|e| format!("安装 PyTorch 失败: {}", e))?;
+    
+    // 根据是否使用 GPU 选择不同的 PyTorch 安装方式
+    let output = if use_gpu {
+        // GPU 版本：安装 CUDA 12.4 版本的 PyTorch
+        Command::new(&uv_path)
+            .args([
+                "pip", "install",
+                "--python", python_path.to_str().unwrap(),
+                "torch", "torchaudio",
+                "--index-url", "https://download.pytorch.org/whl/cu124"
+            ])
+            .output()
+            .map_err(|e| format!("安装 PyTorch GPU 版本失败: {}", e))?
+    } else {
+        // CPU 版本
+        Command::new(&uv_path)
+            .args([
+                "pip", "install",
+                "--python", python_path.to_str().unwrap(),
+                "torch", "torchaudio",
+                "--index-url", "https://download.pytorch.org/whl/cpu"
+            ])
+            .output()
+            .map_err(|e| format!("安装 PyTorch 失败: {}", e))?
+    };
     
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -646,6 +686,13 @@ pub async fn install_sensevoice_env(window: Window) -> Result<String, String> {
         return Err(format!("安装 FunASR 失败: {}", stderr));
     }
     
+    // 写入 GPU 版本标记文件
+    if use_gpu {
+        let marker_path = get_gpu_marker_path()?;
+        std::fs::write(&marker_path, "gpu")
+            .map_err(|e| format!("写入 GPU 标记文件失败: {}", e))?;
+    }
+    
     // 写入 Python 转录脚本
     let _ = window.emit("sensevoice-progress", SenseVoiceProgress {
         progress: 90.0,
@@ -658,11 +705,11 @@ pub async fn install_sensevoice_env(window: Window) -> Result<String, String> {
     // 完成
     let _ = window.emit("sensevoice-progress", SenseVoiceProgress {
         progress: 100.0,
-        current_text: "SenseVoice 环境安装完成！".to_string(),
+        current_text: format!("SenseVoice {} 版本安装完成！", version_type),
         status: "completed".to_string(),
     });
     
-    Ok("SenseVoice 环境安装成功".to_string())
+    Ok(format!("SenseVoice {} 版本安装成功", version_type))
 }
 
 /// 写入 Python 转录脚本
@@ -672,6 +719,7 @@ fn write_transcription_script() -> Result<(), String> {
     
     // 简化版脚本 - 直接使用 VAD 分段，不做额外合并
     // 增加进度输出到 stderr
+    // 自动检测 CUDA 可用性，有 GPU 就用 GPU，否则用 CPU
     let script_content = r#"#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """SenseVoice 转录脚本 - 参考 jianchang512/sense-api 实现"""
@@ -690,7 +738,16 @@ if sys.platform == 'win32':
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 
+import torch
 from pydub import AudioSegment
+
+# 自动检测设备：优先使用 CUDA，否则使用 CPU
+def get_device():
+    if torch.cuda.is_available():
+        return "cuda"
+    return "cpu"
+
+DEVICE = get_device()
 
 def emit_progress(current, total, status, message=""):
     """输出进度信息到 stderr（JSON 格式）"""
@@ -721,23 +778,24 @@ def transcribe(audio_path, language="auto"):
     from funasr import AutoModel
     from funasr.utils.postprocess_utils import rich_transcription_postprocess
     
-    emit_progress(0, 100, "loading", "正在加载语音模型...")
+    device_tag = "[GPU]" if DEVICE == "cuda" else "[CPU]"
+    emit_progress(0, 100, "loading", f"{device_tag} 正在加载 SenseVoice 模型...")
     
     # 加载 VAD 模型（关键参数：max_end_silence_time=250 让分段更敏感）
     vad_model = AutoModel(
         model="fsmn-vad",
         max_single_segment_time=15000,  # 最长 15 秒
         max_end_silence_time=250,       # 静音 250ms 就分段
-        device="cpu"
+        device=DEVICE
     )
     
-    emit_progress(5, 100, "loading", "正在加载 SenseVoice 模型...")
+    emit_progress(5, 100, "loading", f"{device_tag} 正在加载 SenseVoice 模型...")
     
     # 加载 SenseVoice 模型
     model = AutoModel(
         model="iic/SenseVoiceSmall",
         trust_remote_code=True,
-        device="cpu"
+        device=DEVICE
     )
     
     emit_progress(10, 100, "vad", "正在分析语音片段...")

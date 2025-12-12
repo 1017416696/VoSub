@@ -1232,8 +1232,9 @@ const onSelectModel = (command: string) => {
 .progress-stats {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: baseline;
   gap: 12px;
+  flex-wrap: wrap;
 }
 
 .progress-percentage {
@@ -1241,6 +1242,7 @@ const onSelectModel = (command: string) => {
   font-weight: 700;
   color: #409eff;
   font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
 }
 
 /* 转录状态文字 */
@@ -1256,7 +1258,7 @@ const onSelectModel = (command: string) => {
   color: #909399;
   text-align: right;
   flex: 1;
-  min-width: 0;
+  min-width: 150px;
 }
 
 /* 提示信息 */

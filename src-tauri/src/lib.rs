@@ -202,8 +202,8 @@ fn check_sensevoice_env_status() -> SenseVoiceEnvStatus {
 
 /// 安装 SenseVoice 环境
 #[tauri::command]
-async fn install_sensevoice(window: tauri::Window) -> Result<String, String> {
-    install_sensevoice_env(window).await
+async fn install_sensevoice(window: tauri::Window, use_gpu: Option<bool>) -> Result<String, String> {
+    install_sensevoice_env(window, use_gpu.unwrap_or(false)).await
 }
 
 /// 使用 SenseVoice 转录音频
