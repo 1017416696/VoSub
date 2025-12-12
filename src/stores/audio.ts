@@ -522,22 +522,22 @@ export const useAudioStore = defineStore('audio', () => {
   // 生成波形数据
   const generateWaveform = async (filePath: string) => {
     const waveformStartTime = Date.now()
-    
+
     if (!isGeneratingWaveform.value) {
       isGeneratingWaveform.value = true
     }
     if (waveformProgress.value !== 0) {
       waveformProgress.value = 0
     }
-    
+
     try {
       const targetSamples = 20000
-      
+
       const waveform = await invoke<number[]>('generate_audio_waveform', {
         filePath,
-        targetSamples
+        targetSamples,
       })
-      
+
       // 保存到当前 tab
       if (tabManager.activeTab && waveform) {
         tabManager.activeTab.audio.waveform = waveform

@@ -411,7 +411,8 @@ const finishTranscription = async (audioPath: string, entries: SubtitleEntry[]) 
     }
   }
 
-  const fileName = audioPath.split('/').pop() || 'transcription.srt'
+  // 兼容 Windows 和 Unix 路径分隔符
+  const fileName = audioPath.split(/[/\\]/).pop() || 'transcription.srt'
   const srtFileName = fileName.replace(/\.[^.]+$/, '.srt')
   // 生成与音频文件同目录的 srt 文件路径
   let srtPath = audioPath.replace(/\.[^.]+$/, '.srt')

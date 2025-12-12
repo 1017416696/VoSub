@@ -1623,7 +1623,13 @@ const renderWaveformSegment = (data: number[], forceFullRender = false) => {
   const visibleRange = getVisibleWaveformRange()
   
   // 短音频（< 3000px）直接全量渲染，避免分段开销
-  if (totalWidth < 3000 || forceFullRender) {
+  // 注意：某些浏览器对 canvas 尺寸有限制（如 Chrome 最大约 16384px）
+  // 如果 canvas 实际像素宽度太大，强制使用分段渲染
+  const maxCanvasWidth = 16000 // 安全的最大宽度
+  const shouldFullRender =
+    (totalWidth < 3000 || forceFullRender) && totalWidth * dpr <= maxCanvasWidth
+
+  if (shouldFullRender) {
     // 全量渲染
     canvas.width = totalWidth * dpr
     canvas.height = height * dpr
@@ -1631,7 +1637,7 @@ const renderWaveformSegment = (data: number[], forceFullRender = false) => {
     canvas.style.height = height + 'px'
     canvas.style.left = '0px'
     ctx.scale(dpr, dpr)
-    
+
     renderWaveformToContext(ctx, smoothedData, 0, totalWidth, totalWidth, height)
     lastRenderedRange.value = { start: 0, end: totalWidth }
     return
@@ -1806,7 +1812,12 @@ watch(
 watch(
   () => props.duration,
   (duration) => {
-    if (duration > 0 && props.waveformData && props.waveformData.length > 0 && !props.isGeneratingWaveform) {
+    if (
+      duration > 0 &&
+      props.waveformData &&
+      props.waveformData.length > 0 &&
+      !props.isGeneratingWaveform
+    ) {
       nextTick(() => {
         loadWaveformData(props.waveformData!)
       })
