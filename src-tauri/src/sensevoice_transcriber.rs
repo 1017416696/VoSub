@@ -99,11 +99,27 @@ fn get_python_path() -> Result<PathBuf, String> {
 
 /// 检查 uv 是否已安装
 fn check_uv_installed() -> bool {
-    Command::new("uv")
-        .arg("--version")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        
+        Command::new("uv")
+            .arg("--version")
+            .creation_flags(CREATE_NO_WINDOW)
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    }
+    
+    #[cfg(not(target_os = "windows"))]
+    {
+        Command::new("uv")
+            .arg("--version")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    }
 }
 
 /// 检查 SenseVoice 环境状态（快速检查，不启动 Python）
