@@ -14,6 +14,7 @@ use whisper_transcriber::{
 use sensevoice_transcriber::{
     check_sensevoice_env, install_sensevoice_env, transcribe_with_sensevoice, 
     uninstall_sensevoice_env, cancel_sensevoice_transcription, SenseVoiceEnvStatus,
+    get_sensevoice_models, download_sensevoice_model, delete_sensevoice_model, SenseVoiceModelInfo,
 };
 use firered_corrector::{
     check_firered_env, install_firered_env, correct_with_firered, correct_single_entry,
@@ -225,6 +226,24 @@ fn uninstall_sensevoice() -> Result<String, String> {
 #[tauri::command]
 fn cancel_sensevoice_task() {
     cancel_sensevoice_transcription();
+}
+
+/// 获取 SenseVoice 模型列表
+#[tauri::command]
+fn get_sensevoice_model_list() -> Vec<SenseVoiceModelInfo> {
+    get_sensevoice_models()
+}
+
+/// 下载 SenseVoice 模型
+#[tauri::command]
+async fn download_sensevoice_model_cmd(window: tauri::Window, model_name: String) -> Result<String, String> {
+    download_sensevoice_model(&model_name, window).await
+}
+
+/// 删除 SenseVoice 模型
+#[tauri::command]
+fn delete_sensevoice_model_cmd(model_name: String) -> Result<String, String> {
+    delete_sensevoice_model(&model_name)
 }
 
 // ============ FireRedASR 校正相关命令 ============
@@ -954,6 +973,9 @@ pub fn run() {
             transcribe_with_sensevoice_model,
             uninstall_sensevoice,
             cancel_sensevoice_task,
+            get_sensevoice_model_list,
+            download_sensevoice_model_cmd,
+            delete_sensevoice_model_cmd,
             // FireRedASR 校正相关
             check_firered_env_status,
             install_firered,

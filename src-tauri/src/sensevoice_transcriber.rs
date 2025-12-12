@@ -39,6 +39,303 @@ pub struct SenseVoiceEnvStatus {
     pub ready: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SenseVoiceModelInfo {
+    pub name: String,
+    pub size: String,
+    pub downloaded: bool,
+    pub partial_size: Option<u64>,
+}
+
+/// SenseVoice 模型文件信息
+struct ModelFileInfo {
+    name: &'static str,
+    size: u64,
+    is_lfs: bool,
+}
+
+/// SenseVoiceSmall 模型需要下载的文件列表
+const SENSEVOICE_SMALL_FILES: &[ModelFileInfo] = &[
+    ModelFileInfo { name: "model.pt", size: 936291369, is_lfs: true },
+    ModelFileInfo { name: "chn_jpn_yue_eng_ko_spectok.bpe.model", size: 377341, is_lfs: true },
+    ModelFileInfo { name: "configuration.json", size: 396, is_lfs: false },
+    ModelFileInfo { name: "config.yaml", size: 1855, is_lfs: false },
+    ModelFileInfo { name: "am.mvn", size: 11203, is_lfs: false },
+    ModelFileInfo { name: "tokens.json", size: 352064, is_lfs: false },
+];
+
+/// 获取 SenseVoice 模型缓存目录
+pub fn get_sensevoice_model_dir() -> Result<PathBuf, String> {
+    let home_dir = dirs::home_dir()
+        .ok_or_else(|| "Failed to get home directory".to_string())?;
+    
+    // 使用与 ModelScope 兼容的缓存目录
+    let model_dir = home_dir.join(".cache").join("modelscope").join("hub").join("iic");
+    
+    Ok(model_dir)
+}
+
+/// 获取模型文件路径
+fn get_sensevoice_model_path(model_name: &str) -> Result<PathBuf, String> {
+    let model_dir = get_sensevoice_model_dir()?;
+    Ok(model_dir.join(model_name))
+}
+
+/// 获取部分下载文件路径
+fn get_sensevoice_part_file_path(model_name: &str, file_name: &str) -> Result<PathBuf, String> {
+    let model_path = get_sensevoice_model_path(model_name)?;
+    Ok(model_path.join(format!("{}.part", file_name)))
+}
+
+/// 检查 SenseVoice 模型是否已下载
+pub fn is_sensevoice_model_downloaded(model_name: &str) -> bool {
+    let model_path = match get_sensevoice_model_path(model_name) {
+        Ok(path) => path,
+        Err(_) => return false,
+    };
+    
+    if !model_path.exists() {
+        return false;
+    }
+    
+    // 检查主要模型文件是否存在
+    let model_pt = model_path.join("model.pt");
+    let config = model_path.join("configuration.json");
+    
+    model_pt.exists() && config.exists()
+}
+
+/// 获取已下载的部分大小
+pub fn get_sensevoice_partial_size(model_name: &str) -> u64 {
+    let model_path = match get_sensevoice_model_path(model_name) {
+        Ok(path) => path,
+        Err(_) => return 0,
+    };
+    
+    let mut total_partial = 0u64;
+    
+    // 检查已下载的文件大小
+    for file_info in SENSEVOICE_SMALL_FILES {
+        let file_path = model_path.join(file_info.name);
+        let part_path = model_path.join(format!("{}.part", file_info.name));
+        
+        if file_path.exists() {
+            if let Ok(meta) = std::fs::metadata(&file_path) {
+                total_partial += meta.len();
+            }
+        } else if part_path.exists() {
+            if let Ok(meta) = std::fs::metadata(&part_path) {
+                total_partial += meta.len();
+            }
+        }
+    }
+    
+    total_partial
+}
+
+/// 获取 SenseVoice 可用模型列表
+pub fn get_sensevoice_models() -> Vec<SenseVoiceModelInfo> {
+    let downloaded = is_sensevoice_model_downloaded("SenseVoiceSmall");
+    let partial_size = if !downloaded {
+        let size = get_sensevoice_partial_size("SenseVoiceSmall");
+        if size > 0 { Some(size) } else { None }
+    } else {
+        None
+    };
+    
+    vec![
+        SenseVoiceModelInfo {
+            name: "SenseVoiceSmall".to_string(),
+            size: "~893 MB".to_string(),
+            downloaded,
+            partial_size,
+        },
+    ]
+}
+
+/// 下载 SenseVoice 模型（支持断点续传）
+pub async fn download_sensevoice_model(model_name: &str, window: Window) -> Result<String, String> {
+    use std::fs::{self, OpenOptions};
+    use std::io::Write;
+    
+    reset_cancellation();
+    
+    // 检查环境是否就绪
+    let env_status = check_sensevoice_env();
+    if !env_status.ready {
+        return Err("SenseVoice 环境未安装，请先安装环境".to_string());
+    }
+    
+    // 检查是否已下载
+    if is_sensevoice_model_downloaded(model_name) {
+        return Ok(format!("{} 模型已下载", model_name));
+    }
+    
+    let model_path = get_sensevoice_model_path(model_name)?;
+    
+    // 创建模型目录
+    if !model_path.exists() {
+        fs::create_dir_all(&model_path)
+            .map_err(|e| format!("创建模型目录失败: {}", e))?;
+    }
+    
+    // 计算总大小
+    let total_size: u64 = SENSEVOICE_SMALL_FILES.iter().map(|f| f.size).sum();
+    let mut downloaded_total: u64 = 0;
+    
+    // 发送初始进度
+    let _ = window.emit("sensevoice-model-progress", SenseVoiceProgress {
+        progress: 0.0,
+        current_text: format!("正在下载 {} 模型...", model_name),
+        status: "downloading".to_string(),
+    });
+    
+    let client = reqwest::Client::builder()
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+        .build()
+        .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
+    
+    // 下载每个文件
+    for (file_idx, file_info) in SENSEVOICE_SMALL_FILES.iter().enumerate() {
+        let file_path = model_path.join(file_info.name);
+        let part_path = model_path.join(format!("{}.part", file_info.name));
+        
+        // 如果文件已存在且大小正确，跳过
+        if file_path.exists() {
+            if let Ok(meta) = fs::metadata(&file_path) {
+                if meta.len() == file_info.size {
+                    downloaded_total += file_info.size;
+                    continue;
+                }
+            }
+        }
+        
+        // 检查部分下载
+        let existing_size = if part_path.exists() {
+            fs::metadata(&part_path).map(|m| m.len()).unwrap_or(0)
+        } else {
+            0
+        };
+        
+        // 构建下载 URL
+        let download_url = format!(
+            "https://modelscope.cn/models/iic/{}/resolve/master/{}",
+            model_name, file_info.name
+        );
+        
+        // 发送进度
+        let progress = (downloaded_total as f32 / total_size as f32) * 100.0;
+        let _ = window.emit("sensevoice-model-progress", SenseVoiceProgress {
+            progress,
+            current_text: format!("{:.1}%", progress),
+            status: "downloading".to_string(),
+        });
+        
+        // 构建请求
+        let mut request = client.get(&download_url);
+        if existing_size > 0 {
+            request = request.header("Range", format!("bytes={}-", existing_size));
+        }
+        
+        let response = request.send().await
+            .map_err(|e| format!("下载 {} 失败: {}", file_info.name, e))?;
+        
+        let status = response.status();
+        let is_partial = status == reqwest::StatusCode::PARTIAL_CONTENT;
+        
+        if !status.is_success() && !is_partial {
+            return Err(format!("下载 {} 失败: HTTP {}", file_info.name, status));
+        }
+        
+        // 确定实际起始位置
+        let actual_start = if is_partial { existing_size } else {
+            if existing_size > 0 {
+                let _ = fs::remove_file(&part_path);
+            }
+            0
+        };
+        
+        // 打开文件
+        let (mut file, mut file_downloaded) = if actual_start > 0 {
+            let file = OpenOptions::new()
+                .append(true)
+                .open(&part_path)
+                .map_err(|e| format!("打开部分文件失败: {}", e))?;
+            (file, actual_start)
+        } else {
+            let file = fs::File::create(&part_path)
+                .map_err(|e| format!("创建文件失败: {}", e))?;
+            (file, 0u64)
+        };
+        
+        // 流式下载
+        let mut response = response;
+        while let Some(chunk) = response.chunk().await
+            .map_err(|e| format!("读取数据失败: {}", e))? 
+        {
+            // 检查是否取消
+            if is_cancelled() {
+                return Err("下载已取消".to_string());
+            }
+            
+            file.write_all(&chunk)
+                .map_err(|e| format!("写入文件失败: {}", e))?;
+            
+            file_downloaded += chunk.len() as u64;
+            
+            // 更新进度
+            let current_total = downloaded_total + file_downloaded;
+            let progress = (current_total as f32 / total_size as f32) * 100.0;
+            let _ = window.emit("sensevoice-model-progress", SenseVoiceProgress {
+                progress,
+                current_text: format!("{:.1}%", progress),
+                status: "downloading".to_string(),
+            });
+        }
+        
+        file.flush().map_err(|e| format!("刷新文件失败: {}", e))?;
+        drop(file);
+        
+        // 验证文件大小
+        let final_size = fs::metadata(&part_path).map(|m| m.len()).unwrap_or(0);
+        if final_size != file_info.size {
+            return Err(format!(
+                "文件 {} 下载不完整: 期望 {} 字节, 实际 {} 字节",
+                file_info.name, file_info.size, final_size
+            ));
+        }
+        
+        // 重命名为最终文件
+        fs::rename(&part_path, &file_path)
+            .map_err(|e| format!("重命名文件失败: {}", e))?;
+        
+        downloaded_total += file_info.size;
+    }
+    
+    // 发送完成进度
+    let _ = window.emit("sensevoice-model-progress", SenseVoiceProgress {
+        progress: 100.0,
+        current_text: "模型下载完成！".to_string(),
+        status: "completed".to_string(),
+    });
+    
+    Ok(format!("{} 模型下载成功", model_name))
+}
+
+/// 删除 SenseVoice 模型
+pub fn delete_sensevoice_model(model_name: &str) -> Result<String, String> {
+    let model_path = get_sensevoice_model_path(model_name)?;
+    
+    if !model_path.exists() {
+        return Err(format!("模型 {} 未下载", model_name));
+    }
+    
+    std::fs::remove_dir_all(&model_path)
+        .map_err(|e| format!("删除模型失败: {}", e))?;
+    
+    Ok(format!("模型 {} 已删除", model_name))
+}
+
 /// Python 脚本输出的转录结果
 #[derive(Debug, Deserialize)]
 struct TranscriptionResult {
@@ -221,25 +518,35 @@ pub fn check_sensevoice_env() -> SenseVoiceEnvStatus {
     // 快速检查：只检查 site-packages 中是否存在 funasr 目录
     // 这比启动 Python 导入模块快得多
     let ready = if env_exists {
-        let site_packages = env_dir.join("lib");
-        if site_packages.exists() {
-            std::fs::read_dir(&site_packages)
-                .ok()
-                .and_then(|entries| {
-                    for entry in entries.flatten() {
-                        let path = entry.path();
-                        if path.is_dir() && path.file_name().map(|n| n.to_string_lossy().starts_with("python")).unwrap_or(false) {
-                            let sp = path.join("site-packages").join("funasr");
-                            if sp.exists() {
-                                return Some(true);
+        #[cfg(target_os = "windows")]
+        {
+            // Windows: Lib/site-packages/funasr
+            let funasr_path = env_dir.join("Lib").join("site-packages").join("funasr");
+            funasr_path.exists()
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            // Linux/macOS: lib/pythonX.X/site-packages/funasr
+            let site_packages = env_dir.join("lib");
+            if site_packages.exists() {
+                std::fs::read_dir(&site_packages)
+                    .ok()
+                    .and_then(|entries| {
+                        for entry in entries.flatten() {
+                            let path = entry.path();
+                            if path.is_dir() && path.file_name().map(|n| n.to_string_lossy().starts_with("python")).unwrap_or(false) {
+                                let sp = path.join("site-packages").join("funasr");
+                                if sp.exists() {
+                                    return Some(true);
+                                }
                             }
                         }
-                    }
-                    None
-                })
-                .unwrap_or(false)
-        } else {
-            false
+                        None
+                    })
+                    .unwrap_or(false)
+            } else {
+                false
+            }
         }
     } else {
         false

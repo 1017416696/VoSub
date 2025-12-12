@@ -240,6 +240,14 @@ interface SenseVoiceEnvStatus {
   ready: boolean
 }
 
+// SenseVoice 模型信息
+interface SenseVoiceModelInfo {
+  name: string
+  size: string
+  downloaded: boolean
+  partial_size?: number
+}
+
 // FireRedASR 环境状态
 interface FireRedEnvStatus {
   uv_installed: boolean
@@ -254,6 +262,10 @@ const downloadMessage = ref('')
 
 // SenseVoice 相关
 const sensevoiceStatus = ref<SenseVoiceEnvStatus>({ uv_installed: false, env_exists: false, ready: false })
+const sensevoiceModels = ref<SenseVoiceModelInfo[]>([])
+const downloadingSensevoiceModel = ref<string | null>(null)
+const sensevoiceModelProgress = ref(0)
+const sensevoiceModelMessage = ref('')
 const isInstallingSensevoice = ref(false)
 const sensevoiceProgress = ref(0)
 const sensevoiceMessage = ref('')
@@ -277,6 +289,14 @@ const fetchSensevoiceStatus = async () => {
     sensevoiceStatus.value = await invoke<SenseVoiceEnvStatus>('check_sensevoice_env_status')
   } catch (e) {
     console.error('Failed to fetch sensevoice status:', e)
+  }
+}
+
+const fetchSensevoiceModels = async () => {
+  try {
+    sensevoiceModels.value = await invoke<SenseVoiceModelInfo[]>('get_sensevoice_model_list')
+  } catch (e) {
+    console.error('Failed to fetch sensevoice models:', e)
   }
 }
 
@@ -335,10 +355,57 @@ const uninstallSensevoice = async () => {
     })
     await invoke('uninstall_sensevoice')
     await fetchSensevoiceStatus()
+    await fetchSensevoiceModels()
     ElMessage.success('SenseVoice 环境已卸载')
   } catch (e) {
     if (e !== 'cancel') {
       ElMessage.error(`卸载失败：${e instanceof Error ? e.message : '未知错误'}`)
+    }
+  }
+}
+
+// SenseVoice 模型下载
+const downloadSensevoiceModel = async (modelName: string) => {
+  if (!sensevoiceStatus.value.ready) {
+    ElMessage.warning('请先安装 SenseVoice 环境')
+    return
+  }
+  
+  downloadingSensevoiceModel.value = modelName
+  sensevoiceModelProgress.value = 0
+  sensevoiceModelMessage.value = '准备下载...'
+  
+  const unlisten = await listen<{ progress: number; current_text: string }>('sensevoice-model-progress', (event) => {
+    sensevoiceModelProgress.value = event.payload.progress
+    sensevoiceModelMessage.value = event.payload.current_text
+  })
+  
+  try {
+    await invoke('download_sensevoice_model_cmd', { modelName })
+    await fetchSensevoiceModels()
+    ElMessage.success(`模型 ${modelName} 下载完成`)
+  } catch (error) {
+    ElMessage.error(`下载失败：${error instanceof Error ? error.message : String(error)}`)
+  } finally {
+    downloadingSensevoiceModel.value = null
+    unlisten()
+  }
+}
+
+// SenseVoice 模型删除
+const deleteSensevoiceModel = async (modelName: string) => {
+  try {
+    await ElMessageBox.confirm(`确定要删除模型 ${modelName} 吗？`, '删除确认', {
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+    await invoke('delete_sensevoice_model_cmd', { modelName })
+    await fetchSensevoiceModels()
+    ElMessage.success(`模型 ${modelName} 已删除`)
+  } catch (e) {
+    if (e !== 'cancel') {
+      ElMessage.error(`删除失败：${e instanceof Error ? e.message : String(e)}`)
     }
   }
 }
@@ -492,6 +559,7 @@ fetchLogPath()
 const setupWhisperListener = async () => {
   await fetchWhisperModels()
   await fetchSensevoiceStatus()
+  await fetchSensevoiceModels()
   await fetchFireredStatus()
   // 使用专门的 model-download-progress 事件，避免与转录进度冲突
   unlistenProgress = await listen<{ progress: number; current_text: string }>('model-download-progress', (event) => {
@@ -925,20 +993,69 @@ const shortcutCategories = computed(() => {
                   </template>
                   <template v-else>
                     <div 
+                      v-for="model in sensevoiceModels"
+                      :key="model.name"
                       class="model-card single-model"
-                      :class="{ 'is-selected': configStore.transcriptionEngine === 'sensevoice' }"
-                      @click="configStore.transcriptionEngine = 'sensevoice'; configStore.saveWhisperSettings()"
+                      :class="{ 
+                        'is-selected': model.downloaded && configStore.transcriptionEngine === 'sensevoice',
+                        'is-downloaded': model.downloaded,
+                        'is-downloading': downloadingSensevoiceModel === model.name
+                      }"
+                      @click="model.downloaded && (configStore.transcriptionEngine = 'sensevoice', configStore.saveWhisperSettings())"
                     >
                       <div class="model-card-header">
                         <div class="model-select-indicator">
-                          <span class="select-dot" :class="{ active: configStore.transcriptionEngine === 'sensevoice' }"></span>
+                          <span class="select-dot" :class="{ 
+                            active: model.downloaded && configStore.transcriptionEngine === 'sensevoice',
+                            disabled: !model.downloaded 
+                          }"></span>
                         </div>
-                        <span class="model-name">SenseVoiceSmall</span>
+                        <span class="model-name">{{ model.name }}</span>
                       </div>
-                      <span class="model-size">~500 MB</span>
+                      <span class="model-size">{{ model.size }}</span>
                       <div class="model-card-actions" @click.stop>
-                        <el-button size="small" type="danger" plain :disabled="configStore.transcriptionEngine === 'sensevoice'" @click="uninstallSensevoice">卸载</el-button>
+                        <template v-if="downloadingSensevoiceModel === model.name">
+                          <div class="download-progress-inline">
+                            <el-progress :percentage="Math.round(sensevoiceModelProgress)" :stroke-width="4" />
+                          </div>
+                        </template>
+                        <template v-else>
+                          <template v-if="!model.downloaded">
+                            <el-button 
+                              v-if="model.partial_size"
+                              size="small" 
+                              type="success" 
+                              :disabled="!!downloadingSensevoiceModel" 
+                              @click="downloadSensevoiceModel(model.name)"
+                            >
+                              继续下载
+                            </el-button>
+                            <el-button 
+                              v-else
+                              size="small" 
+                              type="primary" 
+                              :disabled="!!downloadingSensevoiceModel" 
+                              @click="downloadSensevoiceModel(model.name)"
+                            >
+                              下载
+                            </el-button>
+                          </template>
+                          <el-button 
+                            v-else 
+                            size="small" 
+                            type="danger" 
+                            plain 
+                            :disabled="!!downloadingSensevoiceModel || configStore.transcriptionEngine === 'sensevoice'" 
+                            @click="deleteSensevoiceModel(model.name)"
+                          >
+                            卸载
+                          </el-button>
+                        </template>
                       </div>
+                    </div>
+                    <!-- 卸载环境按钮 -->
+                    <div class="env-actions">
+                      <el-button size="small" type="danger" plain @click="uninstallSensevoice">卸载环境</el-button>
                     </div>
                   </template>
                 </div>
@@ -2773,5 +2890,11 @@ const shortcutCategories = computed(() => {
   opacity: 0;
 }
 
+/* 环境操作按钮 */
+.env-actions {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #e5e7eb;
+}
 
 </style>
