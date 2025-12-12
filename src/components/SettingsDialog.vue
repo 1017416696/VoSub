@@ -233,12 +233,22 @@ interface WhisperModelInfo {
   partial_size?: number // 部分下载的字节数
 }
 
+// 单个环境的状态
+interface SenseVoiceEnvInfo {
+  installed: boolean
+  ready: boolean
+}
+
 // SenseVoice 环境状态
 interface SenseVoiceEnvStatus {
   uv_installed: boolean
+  cpu_env: SenseVoiceEnvInfo
+  gpu_env: SenseVoiceEnvInfo
+  active_env: string  // "cpu", "gpu", or "none"
+  // 兼容旧字段
   env_exists: boolean
   ready: boolean
-  is_gpu: boolean  // 是否安装了 GPU 版本
+  is_gpu: boolean
 }
 
 // SenseVoice 模型信息
@@ -262,8 +272,16 @@ const downloadProgress = ref(0)
 const downloadMessage = ref('')
 
 // SenseVoice 相关
-const sensevoiceStatus = ref<SenseVoiceEnvStatus>({ uv_installed: false, env_exists: false, ready: false, is_gpu: false })
-const sensevoiceUseGpu = ref(false)  // 是否安装 GPU 版本
+const sensevoiceStatus = ref<SenseVoiceEnvStatus>({ 
+  uv_installed: false, 
+  cpu_env: { installed: false, ready: false },
+  gpu_env: { installed: false, ready: false },
+  active_env: 'none',
+  env_exists: false, 
+  ready: false, 
+  is_gpu: false 
+})
+const sensevoiceInstallType = ref<'cpu' | 'gpu'>('cpu')  // 当前要安装的版本类型
 const sensevoiceModels = ref<SenseVoiceModelInfo[]>([])
 const downloadingSensevoiceModel = ref<string | null>(null)
 const sensevoiceModelProgress = ref(0)
@@ -320,7 +338,8 @@ const recheckUvStatus = async () => {
   }
 }
 
-const installSensevoice = async () => {
+// 安装指定版本的 SenseVoice
+const installSensevoice = async (useGpu: boolean = false) => {
   if (!sensevoiceStatus.value.uv_installed) {
     ElMessage.warning('请先安装 uv 包管理器')
     return
@@ -328,7 +347,8 @@ const installSensevoice = async () => {
   
   isInstallingSensevoice.value = true
   sensevoiceProgress.value = 0
-  const versionType = sensevoiceUseGpu.value ? 'GPU' : 'CPU'
+  sensevoiceInstallType.value = useGpu ? 'gpu' : 'cpu'
+  const versionType = useGpu ? 'GPU' : 'CPU'
   sensevoiceMessage.value = `准备安装 ${versionType} 版本...`
   
   // 监听安装进度
@@ -338,90 +358,59 @@ const installSensevoice = async () => {
   })
   
   try {
-    await invoke('install_sensevoice', { useGpu: sensevoiceUseGpu.value })
+    await invoke('install_sensevoice', { useGpu })
     await fetchSensevoiceStatus()
     ElMessage.success(`SenseVoice ${versionType} 版本安装成功`)
   } catch (error) {
-    ElMessage.error(`安装失败：${error instanceof Error ? error.message : '未知错误'}`)
+    ElMessage.error(`安装失败：${error instanceof Error ? error.message : String(error)}`)
   } finally {
     isInstallingSensevoice.value = false
     unlisten()
   }
 }
 
-const uninstallSensevoice = async () => {
+// 卸载指定版本的 SenseVoice
+const uninstallSensevoiceByType = async (useGpu: boolean) => {
+  const versionType = useGpu ? 'GPU' : 'CPU'
   try {
-    await ElMessageBox.confirm('确定要卸载 SenseVoice 环境吗？这将删除所有相关文件。', '卸载确认', {
-      confirmButtonText: '卸载',
-      cancelButtonText: '取消',
-      type: 'warning'
-    })
-    await invoke('uninstall_sensevoice')
+    await ElMessageBox.confirm(
+      `确定要卸载 SenseVoice ${versionType} 环境吗？这将删除该版本的所有相关文件。`,
+      '卸载确认',
+      {
+        confirmButtonText: '卸载',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+    await invoke('uninstall_sensevoice_by_type', { useGpu })
     await fetchSensevoiceStatus()
-    await fetchSensevoiceModels()
-    ElMessage.success('SenseVoice 环境已卸载')
+    ElMessage.success(`SenseVoice ${versionType} 环境已卸载`)
   } catch (e) {
     if (e !== 'cancel') {
-      ElMessage.error(`卸载失败：${e instanceof Error ? e.message : '未知错误'}`)
+      ElMessage.error(`卸载失败：${e instanceof Error ? e.message : String(e)}`)
     }
   }
 }
 
-// 切换 SenseVoice 版本（CPU <-> GPU）
-const switchSensevoiceVersion = async () => {
-  const currentVersion = sensevoiceStatus.value.is_gpu ? 'GPU' : 'CPU'
-  const targetVersion = sensevoiceStatus.value.is_gpu ? 'CPU' : 'GPU'
-  const sizeHint = sensevoiceStatus.value.is_gpu
-    ? '约 200MB'
-    : '约 2.5GB，需要 NVIDIA 显卡和 CUDA'
+// 兼容旧接口
+const uninstallSensevoice = async () => {
+  // 如果两个版本都安装了，让用户选择卸载哪个
+  if (sensevoiceStatus.value.cpu_env.ready && sensevoiceStatus.value.gpu_env.ready) {
+    ElMessage.warning('请选择要卸载的具体版本')
+    return
+  }
+  // 卸载当前激活的版本
+  await uninstallSensevoiceByType(sensevoiceStatus.value.is_gpu)
+}
 
+// 切换当前使用的 SenseVoice 版本
+const switchSensevoiceVersion = async (useGpu: boolean) => {
   try {
-    await ElMessageBox.confirm(
-      `确定要从 ${currentVersion} 版本切换到 ${targetVersion} 版本吗？\n\n这将卸载当前环境并重新安装（${sizeHint}）。\n模型文件会保留，无需重新下载。`,
-      '切换版本',
-      {
-        confirmButtonText: `切换到 ${targetVersion}`,
-        cancelButtonText: '取消',
-        type: 'info',
-      }
-    )
-
-    // 记录目标版本（在卸载前记录，因为卸载后状态会变）
-    const useGpu = !sensevoiceStatus.value.is_gpu
-
-    // 先卸载
-    isInstallingSensevoice.value = true
-    sensevoiceProgress.value = 0
-    sensevoiceMessage.value = '正在卸载当前环境...'
-
-    await invoke('uninstall_sensevoice')
-    await fetchSensevoiceStatus() // 更新状态
-
-    // 再安装新版本
-    sensevoiceMessage.value = `正在安装 ${targetVersion} 版本...`
-
-    const unlisten = await listen<{ progress: number; current_text: string }>(
-      'sensevoice-progress',
-      (event) => {
-        sensevoiceProgress.value = event.payload.progress
-        sensevoiceMessage.value = event.payload.current_text
-      }
-    )
-
-    try {
-      await invoke('install_sensevoice', { useGpu })
-      await fetchSensevoiceStatus()
-      ElMessage.success(`已切换到 ${targetVersion} 版本`)
-    } finally {
-      unlisten()
-    }
-  } catch (e) {
-    if (e !== 'cancel') {
-      ElMessage.error(`切换失败：${e instanceof Error ? e.message : '未知错误'}`)
-    }
-  } finally {
-    isInstallingSensevoice.value = false
+    await invoke('switch_sensevoice', { useGpu })
     await fetchSensevoiceStatus()
+    ElMessage.success(`已切换到 ${useGpu ? 'GPU' : 'CPU'} 版本`)
+  } catch (e) {
+    ElMessage.error(`切换失败：${e instanceof Error ? e.message : String(e)}`)
   }
 }
 
@@ -1028,11 +1017,6 @@ const shortcutCategories = computed(() => {
                     <h3 class="engine-title">SenseVoice</h3>
                     <span class="engine-badge alibaba">阿里达摩院</span>
                   </div>
-                  <div class="engine-status">
-                    <span class="status-badge" :class="{ ready: sensevoiceStatus.ready, pending: !sensevoiceStatus.ready }">
-                      {{ sensevoiceStatus.ready ? (sensevoiceStatus.is_gpu ? 'GPU 版本' : 'CPU 版本') : (sensevoiceStatus.env_exists ? '依赖不完整' : '未安装') }}
-                    </span>
-                  </div>
                 </div>
                 <p class="engine-desc">阿里达摩院开发的语音识别模型，中文识别效果优秀，支持情感识别。</p>
                 
@@ -1048,100 +1032,172 @@ const shortcutCategories = computed(() => {
                 </div>
                 
                 <div class="engine-content">
-                  <template v-if="!sensevoiceStatus.ready">
-                    <div class="install-options">
-                      <el-checkbox v-model="sensevoiceUseGpu" :disabled="isInstallingSensevoice || !supportsCuda">
-                        安装 GPU 加速版本
-                      </el-checkbox>
-                      <span class="install-hint">
-                        <template v-if="!supportsCuda">macOS 不支持 CUDA，仅可安装 CPU 版本</template>
-                        <template v-else>{{ sensevoiceUseGpu ? '需要 NVIDIA 显卡和 CUDA，下载约 2.5GB' : 'CPU 版本，下载约 200MB' }}</template>
-                      </span>
-                    </div>
-                    <el-button 
-                      type="primary" 
-                      :disabled="isInstallingSensevoice || !sensevoiceStatus.uv_installed"
-                      @click="installSensevoice"
-                    >
-                      {{ isInstallingSensevoice ? '安装中...' : (sensevoiceUseGpu ? '安装 GPU 版本' : '安装 CPU 版本') }}
-                    </el-button>
-                  </template>
-                  <template v-else>
-                    <div 
-                      v-for="model in sensevoiceModels"
-                      :key="model.name"
-                      class="model-card single-model"
-                      :class="{ 
-                        'is-selected': model.downloaded && configStore.transcriptionEngine === 'sensevoice',
-                        'is-downloaded': model.downloaded,
-                        'is-downloading': downloadingSensevoiceModel === model.name
-                      }"
-                      @click="model.downloaded && (configStore.transcriptionEngine = 'sensevoice', configStore.saveWhisperSettings())"
-                    >
-                      <div class="model-card-header">
-                        <div class="model-select-indicator">
-                          <span class="select-dot" :class="{ 
-                            active: model.downloaded && configStore.transcriptionEngine === 'sensevoice',
-                            disabled: !model.downloaded 
-                          }"></span>
-                        </div>
-                        <span class="model-name">{{ model.name }}</span>
+                  <!-- CPU 版本卡片 -->
+                  <div class="env-version-card" :class="{ 'is-active': sensevoiceStatus.active_env === 'cpu' && sensevoiceStatus.cpu_env.ready }">
+                    <div class="env-version-header">
+                      <div class="env-version-info">
+                        <span class="env-version-name">CPU 版本</span>
+                        <span class="env-version-size">~200 MB</span>
                       </div>
-                      <span class="model-size">{{ model.size }}</span>
-                      <div class="model-card-actions" @click.stop>
-                        <template v-if="downloadingSensevoiceModel === model.name">
-                          <div class="download-progress-inline">
-                            <el-progress :percentage="Math.round(sensevoiceModelProgress)" :stroke-width="4" />
+                      <div class="env-version-status">
+                        <span v-if="sensevoiceStatus.cpu_env.ready" class="status-tag ready">
+                          {{ sensevoiceStatus.active_env === 'cpu' ? '使用中' : '已安装' }}
+                        </span>
+                        <span v-else-if="sensevoiceStatus.cpu_env.installed" class="status-tag pending">依赖不完整</span>
+                        <span v-else class="status-tag">未安装</span>
+                      </div>
+                    </div>
+                    <div class="env-version-actions">
+                      <template v-if="sensevoiceStatus.cpu_env.ready">
+                        <el-button 
+                          v-if="sensevoiceStatus.active_env !== 'cpu'"
+                          size="small" 
+                          type="primary"
+                          :disabled="isInstallingSensevoice"
+                          @click="switchSensevoiceVersion(false)"
+                        >
+                          切换使用
+                        </el-button>
+                        <el-button 
+                          size="small" 
+                          type="danger" 
+                          plain
+                          :disabled="isInstallingSensevoice"
+                          @click="uninstallSensevoiceByType(false)"
+                        >
+                          卸载
+                        </el-button>
+                      </template>
+                      <template v-else>
+                        <el-button 
+                          size="small" 
+                          type="primary"
+                          :disabled="isInstallingSensevoice || !sensevoiceStatus.uv_installed"
+                          @click="installSensevoice(false)"
+                        >
+                          {{ isInstallingSensevoice && sensevoiceInstallType === 'cpu' ? '安装中...' : '安装' }}
+                        </el-button>
+                      </template>
+                    </div>
+                  </div>
+                  
+                  <!-- GPU 版本卡片（仅在支持 CUDA 时显示） -->
+                  <div v-if="supportsCuda" class="env-version-card" :class="{ 'is-active': sensevoiceStatus.active_env === 'gpu' && sensevoiceStatus.gpu_env.ready, 'is-recommended': !sensevoiceStatus.gpu_env.ready && !sensevoiceStatus.cpu_env.ready }">
+                    <div class="env-version-header">
+                      <div class="env-version-info">
+                        <span class="env-version-name">
+                          GPU 版本
+                          <span v-if="!sensevoiceStatus.gpu_env.ready && !sensevoiceStatus.cpu_env.ready" class="recommended-tag">推荐</span>
+                        </span>
+                        <span class="env-version-size">~2.5 GB（需要 NVIDIA 显卡和 CUDA）</span>
+                      </div>
+                      <div class="env-version-status">
+                        <span v-if="sensevoiceStatus.gpu_env.ready" class="status-tag ready">
+                          {{ sensevoiceStatus.active_env === 'gpu' ? '使用中' : '已安装' }}
+                        </span>
+                        <span v-else-if="sensevoiceStatus.gpu_env.installed" class="status-tag pending">依赖不完整</span>
+                        <span v-else class="status-tag">未安装</span>
+                      </div>
+                    </div>
+                    <div class="env-version-actions">
+                      <template v-if="sensevoiceStatus.gpu_env.ready">
+                        <el-button 
+                          v-if="sensevoiceStatus.active_env !== 'gpu'"
+                          size="small" 
+                          type="primary"
+                          :disabled="isInstallingSensevoice"
+                          @click="switchSensevoiceVersion(true)"
+                        >
+                          切换使用
+                        </el-button>
+                        <el-button 
+                          size="small" 
+                          type="danger" 
+                          plain
+                          :disabled="isInstallingSensevoice"
+                          @click="uninstallSensevoiceByType(true)"
+                        >
+                          卸载
+                        </el-button>
+                      </template>
+                      <template v-else>
+                        <el-button 
+                          size="small" 
+                          :type="!sensevoiceStatus.gpu_env.ready && !sensevoiceStatus.cpu_env.ready ? 'success' : 'primary'"
+                          :disabled="isInstallingSensevoice || !sensevoiceStatus.uv_installed"
+                          @click="installSensevoice(true)"
+                        >
+                          {{ isInstallingSensevoice && sensevoiceInstallType === 'gpu' ? '安装中...' : '安装' }}
+                        </el-button>
+                      </template>
+                    </div>
+                  </div>
+                  
+                  <!-- 模型下载（只有环境就绪时显示） -->
+                  <template v-if="sensevoiceStatus.ready">
+                    <div class="sensevoice-models-section">
+                      <div class="section-subtitle">模型</div>
+                      <div 
+                        v-for="model in sensevoiceModels"
+                        :key="model.name"
+                        class="model-card single-model"
+                        :class="{ 
+                          'is-selected': model.downloaded && configStore.transcriptionEngine === 'sensevoice',
+                          'is-downloaded': model.downloaded,
+                          'is-downloading': downloadingSensevoiceModel === model.name
+                        }"
+                        @click="model.downloaded && (configStore.transcriptionEngine = 'sensevoice', configStore.saveWhisperSettings())"
+                      >
+                        <div class="model-card-header">
+                          <div class="model-select-indicator">
+                            <span class="select-dot" :class="{ 
+                              active: model.downloaded && configStore.transcriptionEngine === 'sensevoice',
+                              disabled: !model.downloaded 
+                            }"></span>
                           </div>
-                        </template>
-                        <template v-else>
-                          <template v-if="!model.downloaded">
+                          <span class="model-name">{{ model.name }}</span>
+                        </div>
+                        <span class="model-size">{{ model.size }}</span>
+                        <div class="model-card-actions" @click.stop>
+                          <template v-if="downloadingSensevoiceModel === model.name">
+                            <div class="download-progress-inline">
+                              <el-progress :percentage="Math.round(sensevoiceModelProgress)" :stroke-width="4" />
+                            </div>
+                          </template>
+                          <template v-else>
+                            <template v-if="!model.downloaded">
+                              <el-button 
+                                v-if="model.partial_size"
+                                size="small" 
+                                type="success" 
+                                :disabled="!!downloadingSensevoiceModel" 
+                                @click="downloadSensevoiceModel(model.name)"
+                              >
+                                继续下载
+                              </el-button>
+                              <el-button 
+                                v-else
+                                size="small" 
+                                type="primary" 
+                                :disabled="!!downloadingSensevoiceModel" 
+                                @click="downloadSensevoiceModel(model.name)"
+                              >
+                                下载
+                              </el-button>
+                            </template>
                             <el-button 
-                              v-if="model.partial_size"
+                              v-else 
                               size="small" 
-                              type="success" 
-                              :disabled="!!downloadingSensevoiceModel" 
-                              @click="downloadSensevoiceModel(model.name)"
+                              type="danger" 
+                              plain 
+                              :disabled="!!downloadingSensevoiceModel || configStore.transcriptionEngine === 'sensevoice'" 
+                              @click="deleteSensevoiceModel(model.name)"
                             >
-                              继续下载
-                            </el-button>
-                            <el-button 
-                              v-else
-                              size="small" 
-                              type="primary" 
-                              :disabled="!!downloadingSensevoiceModel" 
-                              @click="downloadSensevoiceModel(model.name)"
-                            >
-                              下载
+                              卸载
                             </el-button>
                           </template>
-                          <el-button 
-                            v-else 
-                            size="small" 
-                            type="danger" 
-                            plain 
-                            :disabled="!!downloadingSensevoiceModel || configStore.transcriptionEngine === 'sensevoice'" 
-                            @click="deleteSensevoiceModel(model.name)"
-                          >
-                            卸载
-                          </el-button>
-                        </template>
+                        </div>
                       </div>
-                    </div>
-                    <!-- 环境操作按钮 -->
-                    <div class="env-actions">
-                      <!-- 只有支持 CUDA 或当前是 GPU 版本（需要切换回 CPU）时才显示切换按钮 -->
-                      <el-button 
-                        v-if="supportsCuda || sensevoiceStatus.is_gpu"
-                        size="small" 
-                        type="primary" 
-                        plain 
-                        @click="switchSensevoiceVersion"
-                        :disabled="isInstallingSensevoice"
-                      >
-                        {{ sensevoiceStatus.is_gpu ? '切换到 CPU 版本' : '切换到 GPU 版本' }}
-                      </el-button>
-                      <el-button size="small" type="danger" plain @click="uninstallSensevoice">卸载环境</el-button>
                     </div>
                   </template>
                 </div>
@@ -2997,6 +3053,110 @@ const shortcutCategories = computed(() => {
   margin-top: 12px;
   padding-top: 12px;
   border-top: 1px solid #e5e7eb;
+}
+
+/* SenseVoice 版本卡片 */
+.env-version-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 16px;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  margin-bottom: 10px;
+  transition: all 0.2s;
+}
+
+.env-version-card:hover {
+  background: #f3f4f6;
+}
+
+.env-version-card.is-active {
+  background: #eff6ff;
+  border-color: #93c5fd;
+}
+
+.env-version-card.is-recommended {
+  border-color: #86efac;
+  background: #f0fdf4;
+}
+
+.env-version-header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.env-version-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.env-version-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: #374151;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.recommended-tag {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
+  color: #fff;
+}
+
+.env-version-size {
+  font-size: 12px;
+  color: #9ca3af;
+}
+
+.env-version-status {
+  margin-top: 4px;
+}
+
+.status-tag {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: #f3f4f6;
+  color: #6b7280;
+}
+
+.status-tag.ready {
+  background: rgba(82, 196, 26, 0.1);
+  color: #52c41a;
+}
+
+.status-tag.pending {
+  background: rgba(250, 173, 20, 0.1);
+  color: #faad14;
+}
+
+.env-version-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* SenseVoice 模型区域 */
+.sensevoice-models-section {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.section-subtitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: #6b7280;
+  margin-bottom: 10px;
 }
 
 </style>

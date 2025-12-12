@@ -32,12 +32,23 @@ pub struct SenseVoiceProgress {
     pub status: String,
 }
 
+/// 单个环境的状态
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SenseVoiceEnvInfo {
+    pub installed: bool,
+    pub ready: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SenseVoiceEnvStatus {
     pub uv_installed: bool,
+    pub cpu_env: SenseVoiceEnvInfo,
+    pub gpu_env: SenseVoiceEnvInfo,
+    pub active_env: String,  // "cpu", "gpu", or "none"
+    // 兼容旧字段
     pub env_exists: bool,
     pub ready: bool,
-    pub is_gpu: bool,  // 是否安装了 GPU 版本
+    pub is_gpu: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -427,17 +438,120 @@ struct TranscriptionSegment {
     text: String,
 }
 
-/// 获取 SenseVoice 环境目录
-pub fn get_sensevoice_env_dir() -> Result<PathBuf, String> {
+/// 获取 SenseVoice 环境基础目录
+fn get_sensevoice_base_dir() -> Result<PathBuf, String> {
     let home_dir = dirs::home_dir()
         .ok_or_else(|| "Failed to get home directory".to_string())?;
     
-    let env_dir = home_dir
-        .join(".config")
-        .join("srt-editor")
-        .join("sensevoice-env");
+    Ok(home_dir.join(".config").join("srt-editor"))
+}
+
+/// 获取旧版 SenseVoice 环境目录（用于迁移）
+fn get_legacy_sensevoice_env_dir() -> Result<PathBuf, String> {
+    let base_dir = get_sensevoice_base_dir()?;
+    Ok(base_dir.join("sensevoice-env"))
+}
+
+/// 检查旧版环境是否是 GPU 版本
+fn is_legacy_env_gpu() -> bool {
+    get_legacy_sensevoice_env_dir()
+        .ok()
+        .map(|p| p.join(".gpu_version").exists())
+        .unwrap_or(false)
+}
+
+/// 迁移旧版环境到新目录结构
+fn migrate_legacy_env() -> Result<bool, String> {
+    let legacy_dir = get_legacy_sensevoice_env_dir()?;
     
-    Ok(env_dir)
+    if !legacy_dir.exists() {
+        return Ok(false); // 没有旧环境，无需迁移
+    }
+    
+    // 检查是否已经迁移过（新目录已存在）
+    let cpu_dir = get_sensevoice_cpu_env_dir()?;
+    let gpu_dir = get_sensevoice_gpu_env_dir()?;
+    
+    if cpu_dir.exists() || gpu_dir.exists() {
+        // 新目录已存在，删除旧目录
+        let _ = std::fs::remove_dir_all(&legacy_dir);
+        return Ok(false);
+    }
+    
+    // 判断旧环境是 CPU 还是 GPU 版本
+    let is_gpu = is_legacy_env_gpu();
+    let target_dir = if is_gpu { &gpu_dir } else { &cpu_dir };
+    
+    // 重命名目录
+    std::fs::rename(&legacy_dir, target_dir)
+        .map_err(|e| format!("迁移旧环境失败: {}", e))?;
+    
+    // 设置激活的环境
+    let env_type = if is_gpu { "gpu" } else { "cpu" };
+    set_active_env_type(env_type)?;
+    
+    Ok(true)
+}
+
+/// 获取 SenseVoice CPU 环境目录
+pub fn get_sensevoice_cpu_env_dir() -> Result<PathBuf, String> {
+    let base_dir = get_sensevoice_base_dir()?;
+    Ok(base_dir.join("sensevoice-env-cpu"))
+}
+
+/// 获取 SenseVoice GPU 环境目录
+pub fn get_sensevoice_gpu_env_dir() -> Result<PathBuf, String> {
+    let base_dir = get_sensevoice_base_dir()?;
+    Ok(base_dir.join("sensevoice-env-gpu"))
+}
+
+/// 获取当前激活的环境配置文件路径
+fn get_active_env_config_path() -> Result<PathBuf, String> {
+    let base_dir = get_sensevoice_base_dir()?;
+    Ok(base_dir.join("sensevoice-active-env"))
+}
+
+/// 获取当前激活的环境类型
+pub fn get_active_env_type() -> String {
+    get_active_env_config_path()
+        .ok()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|| "none".to_string())
+}
+
+/// 设置当前激活的环境类型
+pub fn set_active_env_type(env_type: &str) -> Result<(), String> {
+    let config_path = get_active_env_config_path()?;
+    if let Some(parent) = config_path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("创建配置目录失败: {}", e))?;
+    }
+    std::fs::write(&config_path, env_type)
+        .map_err(|e| format!("写入配置失败: {}", e))?;
+    Ok(())
+}
+
+/// 获取 SenseVoice 环境目录（兼容旧代码，返回当前激活的环境）
+pub fn get_sensevoice_env_dir() -> Result<PathBuf, String> {
+    let active = get_active_env_type();
+    match active.as_str() {
+        "gpu" => get_sensevoice_gpu_env_dir(),
+        "cpu" => get_sensevoice_cpu_env_dir(),
+        _ => {
+            // 如果没有激活的环境，检查哪个存在
+            let gpu_dir = get_sensevoice_gpu_env_dir()?;
+            if gpu_dir.exists() {
+                return Ok(gpu_dir);
+            }
+            let cpu_dir = get_sensevoice_cpu_env_dir()?;
+            if cpu_dir.exists() {
+                return Ok(cpu_dir);
+            }
+            // 默认返回 CPU 目录
+            Ok(cpu_dir)
+        }
+    }
 }
 
 /// 获取 Python 脚本目录
@@ -459,17 +573,23 @@ pub fn get_scripts_dir() -> Result<PathBuf, String> {
     Ok(scripts_dir)
 }
 
-/// 获取 Python 可执行文件路径
-fn get_python_path() -> Result<PathBuf, String> {
-    let env_dir = get_sensevoice_env_dir()?;
-    
+/// 获取指定环境的 Python 可执行文件路径
+fn get_python_path_for_env(env_dir: &PathBuf) -> PathBuf {
     #[cfg(target_os = "windows")]
-    let python_path = env_dir.join("Scripts").join("python.exe");
+    {
+        env_dir.join("Scripts").join("python.exe")
+    }
     
     #[cfg(not(target_os = "windows"))]
-    let python_path = env_dir.join("bin").join("python");
-    
-    Ok(python_path)
+    {
+        env_dir.join("bin").join("python")
+    }
+}
+
+/// 获取 Python 可执行文件路径（当前激活的环境）
+fn get_python_path() -> Result<PathBuf, String> {
+    let env_dir = get_sensevoice_env_dir()?;
+    Ok(get_python_path_for_env(&env_dir))
 }
 
 /// 检查 uv 是否已安装
@@ -585,73 +705,107 @@ fn get_uv_path() -> Option<PathBuf> {
     }
 }
 
-/// 获取 GPU 标记文件路径
-fn get_gpu_marker_path() -> Result<PathBuf, String> {
-    let env_dir = get_sensevoice_env_dir()?;
-    Ok(env_dir.join(".gpu_version"))
-}
-
-/// 检查是否安装了 GPU 版本
-fn is_gpu_version_installed() -> bool {
-    get_gpu_marker_path()
-        .map(|p| p.exists())
-        .unwrap_or(false)
+/// 检查指定环境是否就绪
+fn check_env_ready(env_dir: &PathBuf) -> bool {
+    let python_path = get_python_path_for_env(env_dir);
+    if !env_dir.exists() || !python_path.exists() {
+        return false;
+    }
+    
+    #[cfg(target_os = "windows")]
+    {
+        let funasr_path = env_dir.join("Lib").join("site-packages").join("funasr");
+        funasr_path.exists()
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let site_packages = env_dir.join("lib");
+        if site_packages.exists() {
+            std::fs::read_dir(&site_packages)
+                .ok()
+                .and_then(|entries| {
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        if path.is_dir() && path.file_name().map(|n| n.to_string_lossy().starts_with("python")).unwrap_or(false) {
+                            let sp = path.join("site-packages").join("funasr");
+                            if sp.exists() {
+                                return Some(true);
+                            }
+                        }
+                    }
+                    None
+                })
+                .unwrap_or(false)
+        } else {
+            false
+        }
+    }
 }
 
 /// 检查 SenseVoice 环境状态（快速检查，不启动 Python）
 pub fn check_sensevoice_env() -> SenseVoiceEnvStatus {
+    // 先尝试迁移旧版环境
+    let _ = migrate_legacy_env();
+    
     let uv_installed = check_uv_installed();
-    let env_dir = get_sensevoice_env_dir().unwrap_or_default();
-    let python_path = get_python_path().unwrap_or_default();
     
-    let env_exists = env_dir.exists() && python_path.exists();
+    // 检查 CPU 环境
+    let cpu_dir = get_sensevoice_cpu_env_dir().unwrap_or_default();
+    let cpu_installed = cpu_dir.exists();
+    let cpu_ready = check_env_ready(&cpu_dir);
     
-    // 快速检查：只检查 site-packages 中是否存在 funasr 目录
-    // 这比启动 Python 导入模块快得多
-    let ready = if env_exists {
-        #[cfg(target_os = "windows")]
-        {
-            // Windows: Lib/site-packages/funasr
-            let funasr_path = env_dir.join("Lib").join("site-packages").join("funasr");
-            funasr_path.exists()
+    // 检查 GPU 环境
+    let gpu_dir = get_sensevoice_gpu_env_dir().unwrap_or_default();
+    let gpu_installed = gpu_dir.exists();
+    let gpu_ready = check_env_ready(&gpu_dir);
+    
+    // 获取当前激活的环境
+    let mut active_env = get_active_env_type();
+    
+    // 如果激活的环境不存在，自动切换到可用的环境
+    if active_env == "gpu" && !gpu_ready {
+        if cpu_ready {
+            let _ = set_active_env_type("cpu");
+            active_env = "cpu".to_string();
+        } else {
+            let _ = set_active_env_type("none");
+            active_env = "none".to_string();
         }
-        #[cfg(not(target_os = "windows"))]
-        {
-            // Linux/macOS: lib/pythonX.X/site-packages/funasr
-            let site_packages = env_dir.join("lib");
-            if site_packages.exists() {
-                std::fs::read_dir(&site_packages)
-                    .ok()
-                    .and_then(|entries| {
-                        for entry in entries.flatten() {
-                            let path = entry.path();
-                            if path.is_dir() && path.file_name().map(|n| n.to_string_lossy().starts_with("python")).unwrap_or(false) {
-                                let sp = path.join("site-packages").join("funasr");
-                                if sp.exists() {
-                                    return Some(true);
-                                }
-                            }
-                        }
-                        None
-                    })
-                    .unwrap_or(false)
-            } else {
-                false
-            }
+    } else if active_env == "cpu" && !cpu_ready {
+        if gpu_ready {
+            let _ = set_active_env_type("gpu");
+            active_env = "gpu".to_string();
+        } else {
+            let _ = set_active_env_type("none");
+            active_env = "none".to_string();
         }
-    } else {
-        false
-    };
+    } else if active_env == "none" {
+        // 自动选择一个可用的环境
+        if gpu_ready {
+            let _ = set_active_env_type("gpu");
+            active_env = "gpu".to_string();
+        } else if cpu_ready {
+            let _ = set_active_env_type("cpu");
+            active_env = "cpu".to_string();
+        }
+    }
     
-    // 检查是否是 GPU 版本
-    let is_gpu = if ready {
-        is_gpu_version_installed()
-    } else {
-        false
-    };
+    // 兼容旧字段
+    let env_exists = cpu_installed || gpu_installed;
+    let ready = cpu_ready || gpu_ready;
+    let is_gpu = active_env == "gpu";
     
     SenseVoiceEnvStatus {
         uv_installed,
+        cpu_env: SenseVoiceEnvInfo {
+            installed: cpu_installed,
+            ready: cpu_ready,
+        },
+        gpu_env: SenseVoiceEnvInfo {
+            installed: gpu_installed,
+            ready: gpu_ready,
+        },
+        active_env,
         env_exists,
         ready,
         is_gpu,
@@ -668,7 +822,12 @@ pub async fn install_sensevoice_env(window: Window, use_gpu: bool) -> Result<Str
     let uv_path = get_uv_path()
         .ok_or("请先安装 uv 包管理器。访问 https://docs.astral.sh/uv/getting-started/installation/ 了解安装方法")?;
     
-    let env_dir = get_sensevoice_env_dir()?;
+    // 根据版本选择对应的环境目录
+    let env_dir = if use_gpu {
+        get_sensevoice_gpu_env_dir()?
+    } else {
+        get_sensevoice_cpu_env_dir()?
+    };
     
     let version_type = if use_gpu { "GPU" } else { "CPU" };
     
@@ -705,7 +864,7 @@ pub async fn install_sensevoice_env(window: Window, use_gpu: bool) -> Result<Str
         status: "installing".to_string(),
     });
     
-    let python_path = get_python_path()?;
+    let python_path = get_python_path_for_env(&env_dir);
     
     // 根据是否使用 GPU 选择不同的 PyTorch 安装方式
     let output = if use_gpu {
@@ -763,13 +922,6 @@ pub async fn install_sensevoice_env(window: Window, use_gpu: bool) -> Result<Str
         return Err(format!("安装 FunASR 失败: {}", stderr));
     }
     
-    // 写入 GPU 版本标记文件
-    if use_gpu {
-        let marker_path = get_gpu_marker_path()?;
-        std::fs::write(&marker_path, "gpu")
-            .map_err(|e| format!("写入 GPU 标记文件失败: {}", e))?;
-    }
-    
     // 写入 Python 转录脚本
     let _ = window.emit("sensevoice-progress", SenseVoiceProgress {
         progress: 90.0,
@@ -779,6 +931,10 @@ pub async fn install_sensevoice_env(window: Window, use_gpu: bool) -> Result<Str
     
     write_transcription_script()?;
     
+    // 设置为当前激活的环境
+    let env_type = if use_gpu { "gpu" } else { "cpu" };
+    set_active_env_type(env_type)?;
+    
     // 完成
     let _ = window.emit("sensevoice-progress", SenseVoiceProgress {
         progress: 100.0,
@@ -787,6 +943,60 @@ pub async fn install_sensevoice_env(window: Window, use_gpu: bool) -> Result<Str
     });
     
     Ok(format!("SenseVoice {} 版本安装成功", version_type))
+}
+
+/// 切换当前使用的 SenseVoice 环境
+pub fn switch_sensevoice_env(use_gpu: bool) -> Result<String, String> {
+    let env_type = if use_gpu { "gpu" } else { "cpu" };
+    let env_dir = if use_gpu {
+        get_sensevoice_gpu_env_dir()?
+    } else {
+        get_sensevoice_cpu_env_dir()?
+    };
+    
+    if !check_env_ready(&env_dir) {
+        return Err(format!("{} 环境未安装或不完整", if use_gpu { "GPU" } else { "CPU" }));
+    }
+    
+    set_active_env_type(env_type)?;
+    Ok(format!("已切换到 {} 版本", if use_gpu { "GPU" } else { "CPU" }))
+}
+
+/// 卸载指定的 SenseVoice 环境
+pub fn uninstall_sensevoice_env_by_type(use_gpu: bool) -> Result<String, String> {
+    let env_dir = if use_gpu {
+        get_sensevoice_gpu_env_dir()?
+    } else {
+        get_sensevoice_cpu_env_dir()?
+    };
+    
+    let version_type = if use_gpu { "GPU" } else { "CPU" };
+    
+    if env_dir.exists() {
+        std::fs::remove_dir_all(&env_dir)
+            .map_err(|e| format!("删除 {} 环境目录失败: {}", version_type, e))?;
+    }
+    
+    // 如果卸载的是当前激活的环境，切换到另一个可用的环境
+    let active = get_active_env_type();
+    let uninstalled_type = if use_gpu { "gpu" } else { "cpu" };
+    if active == uninstalled_type {
+        // 检查另一个环境是否可用
+        let other_dir = if use_gpu {
+            get_sensevoice_cpu_env_dir()?
+        } else {
+            get_sensevoice_gpu_env_dir()?
+        };
+        
+        if check_env_ready(&other_dir) {
+            let other_type = if use_gpu { "cpu" } else { "gpu" };
+            set_active_env_type(other_type)?;
+        } else {
+            set_active_env_type("none")?;
+        }
+    }
+    
+    Ok(format!("SenseVoice {} 环境已卸载", version_type))
 }
 
 /// 写入 Python 转录脚本
@@ -1202,14 +1412,28 @@ pub async fn transcribe_with_sensevoice(
     Ok(entries)
 }
 
-/// 卸载 SenseVoice 环境
+/// 卸载 SenseVoice 环境（兼容旧接口，卸载当前激活的环境）
 pub fn uninstall_sensevoice_env() -> Result<String, String> {
-    let env_dir = get_sensevoice_env_dir()?;
-    
-    if env_dir.exists() {
-        std::fs::remove_dir_all(&env_dir)
-            .map_err(|e| format!("删除环境目录失败: {}", e))?;
+    let active = get_active_env_type();
+    match active.as_str() {
+        "gpu" => uninstall_sensevoice_env_by_type(true),
+        "cpu" => uninstall_sensevoice_env_by_type(false),
+        _ => {
+            // 如果没有激活的环境，尝试卸载所有存在的环境
+            let cpu_dir = get_sensevoice_cpu_env_dir()?;
+            let gpu_dir = get_sensevoice_gpu_env_dir()?;
+            
+            if cpu_dir.exists() {
+                std::fs::remove_dir_all(&cpu_dir)
+                    .map_err(|e| format!("删除 CPU 环境目录失败: {}", e))?;
+            }
+            if gpu_dir.exists() {
+                std::fs::remove_dir_all(&gpu_dir)
+                    .map_err(|e| format!("删除 GPU 环境目录失败: {}", e))?;
+            }
+            
+            set_active_env_type("none")?;
+            Ok("SenseVoice 环境已卸载".to_string())
+        }
     }
-    
-    Ok("SenseVoice 环境已卸载".to_string())
 }

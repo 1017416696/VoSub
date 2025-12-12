@@ -13,7 +13,8 @@ use whisper_transcriber::{
 };
 use sensevoice_transcriber::{
     check_sensevoice_env, install_sensevoice_env, transcribe_with_sensevoice, 
-    uninstall_sensevoice_env, cancel_sensevoice_transcription, SenseVoiceEnvStatus,
+    uninstall_sensevoice_env, uninstall_sensevoice_env_by_type, switch_sensevoice_env,
+    cancel_sensevoice_transcription, SenseVoiceEnvStatus,
     get_sensevoice_models, download_sensevoice_model, delete_sensevoice_model, SenseVoiceModelInfo,
 };
 use firered_corrector::{
@@ -220,6 +221,18 @@ async fn transcribe_with_sensevoice_model(
 #[tauri::command]
 fn uninstall_sensevoice() -> Result<String, String> {
     uninstall_sensevoice_env()
+}
+
+/// 卸载指定类型的 SenseVoice 环境
+#[tauri::command]
+fn uninstall_sensevoice_by_type(use_gpu: bool) -> Result<String, String> {
+    uninstall_sensevoice_env_by_type(use_gpu)
+}
+
+/// 切换 SenseVoice 环境
+#[tauri::command]
+fn switch_sensevoice(use_gpu: bool) -> Result<String, String> {
+    switch_sensevoice_env(use_gpu)
 }
 
 /// 取消 SenseVoice 转录
@@ -972,6 +985,8 @@ pub fn run() {
             install_sensevoice,
             transcribe_with_sensevoice_model,
             uninstall_sensevoice,
+            uninstall_sensevoice_by_type,
+            switch_sensevoice,
             cancel_sensevoice_task,
             get_sensevoice_model_list,
             download_sensevoice_model_cmd,
