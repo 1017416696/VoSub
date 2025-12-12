@@ -76,10 +76,48 @@ pub fn get_sensevoice_model_dir() -> Result<PathBuf, String> {
     Ok(model_dir)
 }
 
-/// 获取模型文件路径
+/// 获取模型文件路径（检查多种可能的路径格式）
 fn get_sensevoice_model_path(model_name: &str) -> Result<PathBuf, String> {
-    let model_dir = get_sensevoice_model_dir()?;
-    Ok(model_dir.join(model_name))
+    let home_dir = dirs::home_dir()
+        .ok_or_else(|| "Failed to get home directory".to_string())?;
+    
+    let hub_dir = home_dir.join(".cache").join("modelscope").join("hub");
+    
+    // 路径格式1: ~/.cache/modelscope/hub/iic/SenseVoiceSmall
+    let path1 = hub_dir.join("iic").join(model_name);
+    if path1.exists() {
+        return Ok(path1);
+    }
+    
+    // 路径格式2: ~/.cache/modelscope/hub/models/iic/SenseVoiceSmall (Mac 上的路径)
+    let path2 = hub_dir.join("models").join("iic").join(model_name);
+    if path2.exists() {
+        return Ok(path2);
+    }
+    
+    // 路径格式3: ~/.cache/modelscope/hub/models--iic--SenseVoiceSmall/snapshots/xxx
+    // ModelScope 某些版本可能使用这种格式
+    let models_dir = hub_dir.join(format!("models--iic--{}", model_name));
+    if models_dir.exists() {
+        // 查找 snapshots 目录下的最新版本
+        let snapshots_dir = models_dir.join("snapshots");
+        if snapshots_dir.exists() {
+            if let Ok(entries) = std::fs::read_dir(&snapshots_dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        // 返回第一个找到的 snapshot 目录
+                        return Ok(path);
+                    }
+                }
+            }
+        }
+        // 如果没有 snapshots，直接返回 models 目录
+        return Ok(models_dir);
+    }
+    
+    // 默认返回路径格式1（用于新下载）
+    Ok(path1)
 }
 
 /// 获取部分下载文件路径
@@ -90,11 +128,50 @@ fn get_sensevoice_part_file_path(model_name: &str, file_name: &str) -> Result<Pa
 
 /// 检查 SenseVoice 模型是否已下载
 pub fn is_sensevoice_model_downloaded(model_name: &str) -> bool {
-    let model_path = match get_sensevoice_model_path(model_name) {
-        Ok(path) => path,
-        Err(_) => return false,
+    let home_dir = match dirs::home_dir() {
+        Some(dir) => dir,
+        None => return false,
     };
     
+    let hub_dir = home_dir.join(".cache").join("modelscope").join("hub");
+    
+    // 检查路径格式1: ~/.cache/modelscope/hub/iic/SenseVoiceSmall
+    let path1 = hub_dir.join("iic").join(model_name);
+    if check_model_files_exist(&path1) {
+        return true;
+    }
+    
+    // 检查路径格式2: ~/.cache/modelscope/hub/models/iic/SenseVoiceSmall (Mac 上的路径)
+    let path2 = hub_dir.join("models").join("iic").join(model_name);
+    if check_model_files_exist(&path2) {
+        return true;
+    }
+    
+    // 检查路径格式3: ~/.cache/modelscope/hub/models--iic--SenseVoiceSmall/snapshots/xxx
+    let models_dir = hub_dir.join(format!("models--iic--{}", model_name));
+    if models_dir.exists() {
+        let snapshots_dir = models_dir.join("snapshots");
+        if snapshots_dir.exists() {
+            if let Ok(entries) = std::fs::read_dir(&snapshots_dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_dir() && check_model_files_exist(&path) {
+                        return true;
+                    }
+                }
+            }
+        }
+        // 也检查 models 目录本身
+        if check_model_files_exist(&models_dir) {
+            return true;
+        }
+    }
+    
+    false
+}
+
+/// 检查模型文件是否存在
+fn check_model_files_exist(model_path: &std::path::Path) -> bool {
     if !model_path.exists() {
         return false;
     }

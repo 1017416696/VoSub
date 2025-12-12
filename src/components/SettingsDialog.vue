@@ -697,6 +697,11 @@ const isMac = computed(() => {
   return typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.platform)
 })
 
+// 检测是否支持 CUDA（Mac 不支持 CUDA）
+const supportsCuda = computed(() => {
+  return !isMac.value
+})
+
 // 将快捷键拆分为单独的按键数组
 const splitShortcut = (key: string): string[] => {
   // 先替换修饰键符号
@@ -1045,10 +1050,13 @@ const shortcutCategories = computed(() => {
                 <div class="engine-content">
                   <template v-if="!sensevoiceStatus.ready">
                     <div class="install-options">
-                      <el-checkbox v-model="sensevoiceUseGpu" :disabled="isInstallingSensevoice">
+                      <el-checkbox v-model="sensevoiceUseGpu" :disabled="isInstallingSensevoice || !supportsCuda">
                         安装 GPU 加速版本
                       </el-checkbox>
-                      <span class="install-hint">{{ sensevoiceUseGpu ? '需要 NVIDIA 显卡和 CUDA，下载约 2.5GB' : 'CPU 版本，下载约 200MB' }}</span>
+                      <span class="install-hint">
+                        <template v-if="!supportsCuda">macOS 不支持 CUDA，仅可安装 CPU 版本</template>
+                        <template v-else>{{ sensevoiceUseGpu ? '需要 NVIDIA 显卡和 CUDA，下载约 2.5GB' : 'CPU 版本，下载约 200MB' }}</template>
+                      </span>
                     </div>
                     <el-button 
                       type="primary" 
@@ -1122,7 +1130,9 @@ const shortcutCategories = computed(() => {
                     </div>
                     <!-- 环境操作按钮 -->
                     <div class="env-actions">
+                      <!-- 只有支持 CUDA 或当前是 GPU 版本（需要切换回 CPU）时才显示切换按钮 -->
                       <el-button 
+                        v-if="supportsCuda || sensevoiceStatus.is_gpu"
                         size="small" 
                         type="primary" 
                         plain 
