@@ -5,12 +5,25 @@
 import type { TimeStamp } from './subtitle'
 
 /**
+ * 单个 FireRedASR 环境的状态
+ */
+export interface FireRedEnvInfo {
+  installed: boolean
+  ready: boolean
+}
+
+/**
  * FireRedASR 环境状态
  */
 export interface FireRedEnvStatus {
   uv_installed: boolean
+  cpu_env: FireRedEnvInfo
+  gpu_env: FireRedEnvInfo
+  active_env: string  // "cpu", "gpu", or "none"
+  // 兼容旧字段
   env_exists: boolean
   ready: boolean
+  is_gpu: boolean
 }
 
 /**

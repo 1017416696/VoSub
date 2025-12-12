@@ -44,7 +44,15 @@ const showSearchPanel = ref(false)
 const showSettingsDialog = ref(false)
 const showCorrectionDialog = ref(false)
 const correctionEntries = ref<CorrectionEntry[]>([])
-const fireredStatus = ref<FireRedEnvStatus>({ uv_installed: false, env_exists: false, ready: false })
+const fireredStatus = ref<FireRedEnvStatus>({ 
+  uv_installed: false, 
+  cpu_env: { installed: false, ready: false },
+  gpu_env: { installed: false, ready: false },
+  active_env: 'none',
+  env_exists: false, 
+  ready: false,
+  is_gpu: false
+})
 const isCorrecting = ref(false) // 单条校正中
 const isBatchCorrecting = ref(false) // 批量校正中
 const singleCorrectionResult = ref<{ original: string; corrected: string; has_diff: boolean } | null>(null)

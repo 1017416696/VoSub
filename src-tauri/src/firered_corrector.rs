@@ -32,11 +32,23 @@ pub struct FireRedProgress {
     pub status: String,
 }
 
+/// 单个环境的状态
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FireRedEnvInfo {
+    pub installed: bool,
+    pub ready: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FireRedEnvStatus {
     pub uv_installed: bool,
+    pub cpu_env: FireRedEnvInfo,
+    pub gpu_env: FireRedEnvInfo,
+    pub active_env: String,  // "cpu", "gpu", or "none"
+    // 兼容旧字段
     pub env_exists: bool,
     pub ready: bool,
+    pub is_gpu: bool,
 }
 
 /// 校正结果条目
@@ -66,17 +78,107 @@ struct CorrectionEntryRaw {
     has_diff: bool,
 }
 
-/// 获取 FireRedASR 环境目录
-pub fn get_firered_env_dir() -> Result<PathBuf, String> {
+/// 获取 FireRedASR 环境基础目录
+fn get_firered_base_dir() -> Result<PathBuf, String> {
     let home_dir = dirs::home_dir()
         .ok_or_else(|| "Failed to get home directory".to_string())?;
     
-    let env_dir = home_dir
-        .join(".config")
-        .join("srt-editor")
-        .join("firered-env");
+    Ok(home_dir.join(".config").join("srt-editor"))
+}
+
+/// 获取旧版 FireRedASR 环境目录（用于迁移）
+fn get_legacy_firered_env_dir() -> Result<PathBuf, String> {
+    let base_dir = get_firered_base_dir()?;
+    Ok(base_dir.join("firered-env"))
+}
+
+/// 迁移旧版环境到新目录结构
+fn migrate_legacy_firered_env() -> Result<bool, String> {
+    let legacy_dir = get_legacy_firered_env_dir()?;
     
-    Ok(env_dir)
+    if !legacy_dir.exists() {
+        return Ok(false); // 没有旧环境，无需迁移
+    }
+    
+    // 检查是否已经迁移过（新目录已存在）
+    let cpu_dir = get_firered_cpu_env_dir()?;
+    let gpu_dir = get_firered_gpu_env_dir()?;
+    
+    if cpu_dir.exists() || gpu_dir.exists() {
+        // 新目录已存在，删除旧目录
+        let _ = std::fs::remove_dir_all(&legacy_dir);
+        return Ok(false);
+    }
+    
+    // 旧版本都是 CPU 版本，迁移到 CPU 目录
+    std::fs::rename(&legacy_dir, &cpu_dir)
+        .map_err(|e| format!("迁移旧环境失败: {}", e))?;
+    
+    // 设置激活的环境
+    set_firered_active_env_type("cpu")?;
+    
+    Ok(true)
+}
+
+/// 获取 FireRedASR CPU 环境目录
+pub fn get_firered_cpu_env_dir() -> Result<PathBuf, String> {
+    let base_dir = get_firered_base_dir()?;
+    Ok(base_dir.join("firered-env-cpu"))
+}
+
+/// 获取 FireRedASR GPU 环境目录
+pub fn get_firered_gpu_env_dir() -> Result<PathBuf, String> {
+    let base_dir = get_firered_base_dir()?;
+    Ok(base_dir.join("firered-env-gpu"))
+}
+
+/// 获取当前激活的环境配置文件路径
+fn get_firered_active_env_config_path() -> Result<PathBuf, String> {
+    let base_dir = get_firered_base_dir()?;
+    Ok(base_dir.join("firered-active-env"))
+}
+
+/// 获取当前激活的环境类型
+pub fn get_firered_active_env_type() -> String {
+    get_firered_active_env_config_path()
+        .ok()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|| "none".to_string())
+}
+
+/// 设置当前激活的环境类型
+pub fn set_firered_active_env_type(env_type: &str) -> Result<(), String> {
+    let config_path = get_firered_active_env_config_path()?;
+    if let Some(parent) = config_path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("创建配置目录失败: {}", e))?;
+    }
+    std::fs::write(&config_path, env_type)
+        .map_err(|e| format!("写入配置失败: {}", e))?;
+    Ok(())
+}
+
+/// 获取 FireRedASR 环境目录（兼容旧代码，返回当前激活的环境）
+pub fn get_firered_env_dir() -> Result<PathBuf, String> {
+    let active = get_firered_active_env_type();
+    match active.as_str() {
+        "gpu" => get_firered_gpu_env_dir(),
+        "cpu" => get_firered_cpu_env_dir(),
+        _ => {
+            // 如果没有激活的环境，检查哪个存在
+            let gpu_dir = get_firered_gpu_env_dir()?;
+            if gpu_dir.exists() {
+                return Ok(gpu_dir);
+            }
+            let cpu_dir = get_firered_cpu_env_dir()?;
+            if cpu_dir.exists() {
+                return Ok(cpu_dir);
+            }
+            // 默认返回 CPU 目录
+            Ok(cpu_dir)
+        }
+    }
 }
 
 /// 获取 Python 脚本目录
@@ -97,17 +199,23 @@ fn get_scripts_dir() -> Result<PathBuf, String> {
     Ok(scripts_dir)
 }
 
-/// 获取 Python 可执行文件路径
-fn get_python_path() -> Result<PathBuf, String> {
-    let env_dir = get_firered_env_dir()?;
-    
+/// 获取指定环境的 Python 可执行文件路径
+fn get_python_path_for_env(env_dir: &PathBuf) -> PathBuf {
     #[cfg(target_os = "windows")]
-    let python_path = env_dir.join("Scripts").join("python.exe");
+    {
+        env_dir.join("Scripts").join("python.exe")
+    }
     
     #[cfg(not(target_os = "windows"))]
-    let python_path = env_dir.join("bin").join("python");
-    
-    Ok(python_path)
+    {
+        env_dir.join("bin").join("python")
+    }
+}
+
+/// 获取 Python 可执行文件路径（当前激活的环境）
+fn get_python_path() -> Result<PathBuf, String> {
+    let env_dir = get_firered_env_dir()?;
+    Ok(get_python_path_for_env(&env_dir))
 }
 
 /// 检查 uv 是否已安装
@@ -223,22 +331,22 @@ fn get_uv_path() -> Option<PathBuf> {
     }
 }
 
-/// 检查 FireRedASR 环境状态（快速检查，不启动 Python）
-pub fn check_firered_env() -> FireRedEnvStatus {
-    let uv_installed = check_uv_installed();
-    let env_dir = get_firered_env_dir().unwrap_or_default();
-    let python_path = get_python_path().unwrap_or_default();
+/// 检查指定环境是否就绪
+fn check_firered_env_ready(env_dir: &PathBuf) -> bool {
+    let python_path = get_python_path_for_env(env_dir);
+    if !env_dir.exists() || !python_path.exists() {
+        return false;
+    }
     
-    let env_exists = env_dir.exists() && python_path.exists();
-    
-    // 快速检查：只检查 site-packages 中是否存在 fireredasr 目录
-    // 这比启动 Python 导入模块快得多
-    let ready = if env_exists {
+    #[cfg(target_os = "windows")]
+    {
+        let fireredasr_path = env_dir.join("Lib").join("site-packages").join("fireredasr");
+        fireredasr_path.exists()
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
         let site_packages = env_dir.join("lib");
-        // 在 macOS/Linux 上，site-packages 在 lib/pythonX.Y/site-packages
-        // 我们检查是否存在 fireredasr 相关文件
         if site_packages.exists() {
-            // 遍历查找 site-packages 目录
             std::fs::read_dir(&site_packages)
                 .ok()
                 .and_then(|entries| {
@@ -257,31 +365,101 @@ pub fn check_firered_env() -> FireRedEnvStatus {
         } else {
             false
         }
-    } else {
-        false
-    };
+    }
+}
+
+/// 检查 FireRedASR 环境状态（快速检查，不启动 Python）
+pub fn check_firered_env() -> FireRedEnvStatus {
+    // 先尝试迁移旧版环境
+    let _ = migrate_legacy_firered_env();
+    
+    let uv_installed = check_uv_installed();
+    
+    // 检查 CPU 环境
+    let cpu_dir = get_firered_cpu_env_dir().unwrap_or_default();
+    let cpu_installed = cpu_dir.exists();
+    let cpu_ready = check_firered_env_ready(&cpu_dir);
+    
+    // 检查 GPU 环境
+    let gpu_dir = get_firered_gpu_env_dir().unwrap_or_default();
+    let gpu_installed = gpu_dir.exists();
+    let gpu_ready = check_firered_env_ready(&gpu_dir);
+    
+    // 获取当前激活的环境
+    let mut active_env = get_firered_active_env_type();
+    
+    // 如果激活的环境不存在，自动切换到可用的环境
+    if active_env == "gpu" && !gpu_ready {
+        if cpu_ready {
+            let _ = set_firered_active_env_type("cpu");
+            active_env = "cpu".to_string();
+        } else {
+            let _ = set_firered_active_env_type("none");
+            active_env = "none".to_string();
+        }
+    } else if active_env == "cpu" && !cpu_ready {
+        if gpu_ready {
+            let _ = set_firered_active_env_type("gpu");
+            active_env = "gpu".to_string();
+        } else {
+            let _ = set_firered_active_env_type("none");
+            active_env = "none".to_string();
+        }
+    } else if active_env == "none" {
+        // 自动选择一个可用的环境
+        if gpu_ready {
+            let _ = set_firered_active_env_type("gpu");
+            active_env = "gpu".to_string();
+        } else if cpu_ready {
+            let _ = set_firered_active_env_type("cpu");
+            active_env = "cpu".to_string();
+        }
+    }
+    
+    // 兼容旧字段
+    let env_exists = cpu_installed || gpu_installed;
+    let ready = cpu_ready || gpu_ready;
+    let is_gpu = active_env == "gpu";
     
     FireRedEnvStatus {
         uv_installed,
+        cpu_env: FireRedEnvInfo {
+            installed: cpu_installed,
+            ready: cpu_ready,
+        },
+        gpu_env: FireRedEnvInfo {
+            installed: gpu_installed,
+            ready: gpu_ready,
+        },
+        active_env,
         env_exists,
         ready,
+        is_gpu,
     }
 }
 
 
 /// 安装 FireRedASR 环境
-pub async fn install_firered_env(window: Window) -> Result<String, String> {
+/// use_gpu: 是否安装 GPU 版本（需要 NVIDIA 显卡和 CUDA）
+pub async fn install_firered_env(window: Window, use_gpu: bool) -> Result<String, String> {
     reset_cancellation();
     
     // 获取 uv 路径
     let uv_path = get_uv_path()
         .ok_or("请先安装 uv 包管理器。访问 https://docs.astral.sh/uv/getting-started/installation/ 了解安装方法")?;
     
-    let env_dir = get_firered_env_dir()?;
+    // 根据版本选择对应的环境目录
+    let env_dir = if use_gpu {
+        get_firered_gpu_env_dir()?
+    } else {
+        get_firered_cpu_env_dir()?
+    };
+    
+    let version_type = if use_gpu { "GPU" } else { "CPU" };
     
     let _ = window.emit("firered-progress", FireRedProgress {
         progress: 10.0,
-        current_text: "正在创建 Python 虚拟环境...".to_string(),
+        current_text: format!("正在创建 Python 虚拟环境（{} 版本）...", version_type),
         status: "installing".to_string(),
     });
     
@@ -306,21 +484,36 @@ pub async fn install_firered_env(window: Window) -> Result<String, String> {
     
     let _ = window.emit("firered-progress", FireRedProgress {
         progress: 30.0,
-        current_text: "正在安装 PyTorch（可能需要几分钟）...".to_string(),
+        current_text: format!("正在安装 PyTorch {} 版本（可能需要几分钟）...", version_type),
         status: "installing".to_string(),
     });
     
-    // 安装 PyTorch (CPU 版本)
-    let python_path = get_python_path()?;
-    let output = Command::new(&uv_path)
-        .args([
-            "pip", "install",
-            "--python", python_path.to_str().unwrap(),
-            "torch", "torchaudio",
-            "--index-url", "https://download.pytorch.org/whl/cpu"
-        ])
-        .output()
-        .map_err(|e| format!("安装 PyTorch 失败: {}", e))?;
+    let python_path = get_python_path_for_env(&env_dir);
+    
+    // 根据是否使用 GPU 选择不同的 PyTorch 安装方式
+    let output = if use_gpu {
+        // GPU 版本：安装 CUDA 12.4 版本的 PyTorch
+        Command::new(&uv_path)
+            .args([
+                "pip", "install",
+                "--python", python_path.to_str().unwrap(),
+                "torch", "torchaudio",
+                "--index-url", "https://download.pytorch.org/whl/cu124"
+            ])
+            .output()
+            .map_err(|e| format!("安装 PyTorch GPU 版本失败: {}", e))?
+    } else {
+        // CPU 版本
+        Command::new(&uv_path)
+            .args([
+                "pip", "install",
+                "--python", python_path.to_str().unwrap(),
+                "torch", "torchaudio",
+                "--index-url", "https://download.pytorch.org/whl/cpu"
+            ])
+            .output()
+            .map_err(|e| format!("安装 PyTorch 失败: {}", e))?
+    };
     
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -387,13 +580,37 @@ print('Model downloaded successfully')
     
     write_correction_script()?;
     
+    // 设置为当前激活的环境
+    let env_type = if use_gpu { "gpu" } else { "cpu" };
+    set_firered_active_env_type(env_type)?;
+    
     let _ = window.emit("firered-progress", FireRedProgress {
         progress: 100.0,
-        current_text: "FireRedASR 环境安装完成！".to_string(),
+        current_text: format!("FireRedASR {} 版本安装完成！", version_type),
         status: "completed".to_string(),
     });
     
-    Ok("FireRedASR 环境安装成功".to_string())
+    Ok(format!("FireRedASR {} 版本安装成功", version_type))
+}
+
+/// 切换当前使用的 FireRedASR 环境
+pub fn switch_firered_env(use_gpu: bool) -> Result<String, String> {
+    let env_type = if use_gpu { "gpu" } else { "cpu" };
+    let env_dir = if use_gpu {
+        get_firered_gpu_env_dir()?
+    } else {
+        get_firered_cpu_env_dir()?
+    };
+    
+    if !check_firered_env_ready(&env_dir) {
+        return Err(format!("{} 环境未安装或不完整", if use_gpu { "GPU" } else { "CPU" }));
+    }
+    
+    // 停止当前服务（如果正在运行），以便使用新环境
+    stop_service();
+    
+    set_firered_active_env_type(env_type)?;
+    Ok(format!("已切换到 {} 版本", if use_gpu { "GPU" } else { "CPU" }))
 }
 
 /// 写入 Python 校正脚本
@@ -1230,14 +1447,67 @@ pub async fn correct_single_entry(
     Ok(result)
 }
 
-/// 卸载 FireRedASR 环境
-pub fn uninstall_firered_env() -> Result<String, String> {
-    let env_dir = get_firered_env_dir()?;
+/// 卸载指定的 FireRedASR 环境
+pub fn uninstall_firered_env_by_type(use_gpu: bool) -> Result<String, String> {
+    let env_dir = if use_gpu {
+        get_firered_gpu_env_dir()?
+    } else {
+        get_firered_cpu_env_dir()?
+    };
     
-    if env_dir.exists() {
-        std::fs::remove_dir_all(&env_dir)
-            .map_err(|e| format!("删除环境目录失败: {}", e))?;
+    let version_type = if use_gpu { "GPU" } else { "CPU" };
+    
+    if !env_dir.exists() {
+        return Err(format!("{} 环境未安装", version_type));
     }
     
-    Ok("FireRedASR 环境已卸载".to_string())
+    // 如果卸载的是当前激活的环境，需要切换
+    let active = get_firered_active_env_type();
+    let is_active = (use_gpu && active == "gpu") || (!use_gpu && active == "cpu");
+    
+    if is_active {
+        // 停止服务
+        stop_service();
+    }
+    
+    std::fs::remove_dir_all(&env_dir)
+        .map_err(|e| format!("删除环境目录失败: {}", e))?;
+    
+    // 如果卸载的是当前激活的环境，尝试切换到另一个
+    if is_active {
+        let other_dir = if use_gpu {
+            get_firered_cpu_env_dir()?
+        } else {
+            get_firered_gpu_env_dir()?
+        };
+        
+        if check_firered_env_ready(&other_dir) {
+            let other_type = if use_gpu { "cpu" } else { "gpu" };
+            let _ = set_firered_active_env_type(other_type);
+        } else {
+            let _ = set_firered_active_env_type("none");
+        }
+    }
+    
+    Ok(format!("FireRedASR {} 版本已卸载", version_type))
+}
+
+/// 卸载 FireRedASR 环境（兼容旧接口，卸载当前激活的环境）
+pub fn uninstall_firered_env() -> Result<String, String> {
+    let active = get_firered_active_env_type();
+    match active.as_str() {
+        "gpu" => uninstall_firered_env_by_type(true),
+        "cpu" => uninstall_firered_env_by_type(false),
+        _ => {
+            // 尝试卸载两个环境
+            let cpu_result = uninstall_firered_env_by_type(false);
+            let gpu_result = uninstall_firered_env_by_type(true);
+            
+            if cpu_result.is_ok() || gpu_result.is_ok() {
+                Ok("FireRedASR 环境已卸载".to_string())
+            } else {
+                Err("没有已安装的 FireRedASR 环境".to_string())
+            }
+        }
+    }
 }

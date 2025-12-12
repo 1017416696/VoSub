@@ -19,7 +19,8 @@ use sensevoice_transcriber::{
 };
 use firered_corrector::{
     check_firered_env, install_firered_env, correct_with_firered, correct_single_entry,
-    uninstall_firered_env, cancel_firered_correction, preload_firered_service, is_service_running,
+    uninstall_firered_env, uninstall_firered_env_by_type, switch_firered_env,
+    cancel_firered_correction, preload_firered_service, is_service_running,
     preload_audio_for_correction,
     FireRedEnvStatus, CorrectionEntry, SingleCorrectionResult,
 };
@@ -269,8 +270,8 @@ fn check_firered_env_status() -> FireRedEnvStatus {
 
 /// 安装 FireRedASR 环境
 #[tauri::command]
-async fn install_firered(window: tauri::Window) -> Result<String, String> {
-    install_firered_env(window).await
+async fn install_firered(window: tauri::Window, use_gpu: Option<bool>) -> Result<String, String> {
+    install_firered_env(window, use_gpu.unwrap_or(false)).await
 }
 
 /// 使用 FireRedASR 校正字幕
@@ -289,6 +290,18 @@ async fn correct_subtitles_with_firered(
 #[tauri::command]
 fn uninstall_firered() -> Result<String, String> {
     uninstall_firered_env()
+}
+
+/// 卸载指定类型的 FireRedASR 环境
+#[tauri::command]
+fn uninstall_firered_by_type(use_gpu: bool) -> Result<String, String> {
+    uninstall_firered_env_by_type(use_gpu)
+}
+
+/// 切换 FireRedASR 环境
+#[tauri::command]
+fn switch_firered(use_gpu: bool) -> Result<String, String> {
+    switch_firered_env(use_gpu)
 }
 
 /// 取消 FireRedASR 校正
@@ -1000,6 +1013,8 @@ pub fn run() {
             is_firered_service_running,
             preload_audio_for_firered,
             uninstall_firered,
+            uninstall_firered_by_type,
+            switch_firered,
             cancel_firered_task,
             // 导出功能
             export_txt,

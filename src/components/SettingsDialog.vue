@@ -259,11 +259,22 @@ interface SenseVoiceModelInfo {
   partial_size?: number
 }
 
+// 单个 FireRedASR 环境的状态
+interface FireRedEnvInfo {
+  installed: boolean
+  ready: boolean
+}
+
 // FireRedASR 环境状态
 interface FireRedEnvStatus {
   uv_installed: boolean
+  cpu_env: FireRedEnvInfo
+  gpu_env: FireRedEnvInfo
+  active_env: string  // "cpu", "gpu", or "none"
+  // 兼容旧字段
   env_exists: boolean
   ready: boolean
+  is_gpu: boolean
 }
 
 const whisperModels = ref<WhisperModelInfo[]>([])
@@ -291,7 +302,16 @@ const sensevoiceProgress = ref(0)
 const sensevoiceMessage = ref('')
 
 // FireRedASR 相关
-const fireredStatus = ref<FireRedEnvStatus>({ uv_installed: false, env_exists: false, ready: false })
+const fireredStatus = ref<FireRedEnvStatus>({ 
+  uv_installed: false, 
+  cpu_env: { installed: false, ready: false },
+  gpu_env: { installed: false, ready: false },
+  active_env: 'none',
+  env_exists: false, 
+  ready: false,
+  is_gpu: false
+})
+const fireredInstallType = ref<'cpu' | 'gpu'>('cpu')  // 当前要安装的版本类型
 const isInstallingFirered = ref(false)
 const fireredProgress = ref(0)
 const fireredMessage = ref('')
@@ -460,8 +480,8 @@ const deleteSensevoiceModel = async (modelName: string) => {
   }
 }
 
-// FireRedASR 安装
-const installFirered = async () => {
+// 安装指定版本的 FireRedASR
+const installFirered = async (useGpu: boolean = false) => {
   if (!fireredStatus.value.uv_installed) {
     ElMessage.warning('请先安装 uv 包管理器')
     return
@@ -469,7 +489,9 @@ const installFirered = async () => {
   
   isInstallingFirered.value = true
   fireredProgress.value = 0
-  fireredMessage.value = '准备安装...'
+  fireredInstallType.value = useGpu ? 'gpu' : 'cpu'
+  const versionType = useGpu ? 'GPU' : 'CPU'
+  fireredMessage.value = `准备安装 ${versionType} 版本...`
   
   const unlisten = await listen<{ progress: number; current_text: string }>('firered-progress', (event) => {
     fireredProgress.value = event.payload.progress
@@ -477,9 +499,9 @@ const installFirered = async () => {
   })
   
   try {
-    await invoke('install_firered')
+    await invoke('install_firered', { useGpu })
     await fetchFireredStatus()
-    ElMessage.success('FireRedASR 环境安装成功')
+    ElMessage.success(`FireRedASR ${versionType} 版本安装成功`)
   } catch (error) {
     ElMessage.error(`安装失败：${error instanceof Error ? error.message : '未知错误'}`)
   } finally {
@@ -488,20 +510,48 @@ const installFirered = async () => {
   }
 }
 
-const uninstallFirered = async () => {
+// 卸载指定版本的 FireRedASR
+const uninstallFireredByType = async (useGpu: boolean) => {
+  const versionType = useGpu ? 'GPU' : 'CPU'
   try {
-    await ElMessageBox.confirm('确定要卸载 FireRedASR 环境吗？这将删除所有相关文件。', '卸载确认', {
-      confirmButtonText: '卸载',
-      cancelButtonText: '取消',
-      type: 'warning'
-    })
-    await invoke('uninstall_firered')
+    await ElMessageBox.confirm(
+      `确定要卸载 FireRedASR ${versionType} 环境吗？这将删除该版本的所有相关文件。`,
+      '卸载确认',
+      {
+        confirmButtonText: '卸载',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+    await invoke('uninstall_firered_by_type', { useGpu })
     await fetchFireredStatus()
-    ElMessage.success('FireRedASR 环境已卸载')
+    ElMessage.success(`FireRedASR ${versionType} 环境已卸载`)
   } catch (e) {
     if (e !== 'cancel') {
-      ElMessage.error(`卸载失败：${e instanceof Error ? e.message : '未知错误'}`)
+      ElMessage.error(`卸载失败：${e instanceof Error ? e.message : String(e)}`)
     }
+  }
+}
+
+// 兼容旧接口
+const uninstallFirered = async () => {
+  // 如果两个版本都安装了，让用户选择卸载哪个
+  if (fireredStatus.value.cpu_env.ready && fireredStatus.value.gpu_env.ready) {
+    ElMessage.warning('请选择要卸载的具体版本')
+    return
+  }
+  // 卸载当前激活的版本
+  await uninstallFireredByType(fireredStatus.value.is_gpu)
+}
+
+// 切换当前使用的 FireRedASR 版本
+const switchFireredVersion = async (useGpu: boolean) => {
+  try {
+    await invoke('switch_firered', { useGpu })
+    await fetchFireredStatus()
+    ElMessage.success(`已切换到 ${useGpu ? 'GPU' : 'CPU'} 版本`)
+  } catch (e) {
+    ElMessage.error(`切换失败：${e instanceof Error ? e.message : String(e)}`)
   }
 }
 
@@ -1205,11 +1255,7 @@ const shortcutCategories = computed(() => {
                     <h3 class="engine-title">FireRedASR</h3>
                     <span class="engine-badge xiaohongshu">小红书</span>
                   </div>
-                  <div class="engine-status">
-                    <span class="status-badge" :class="{ ready: fireredStatus.ready, pending: !fireredStatus.ready }">
-                      {{ fireredStatus.ready ? '已就绪' : (fireredStatus.env_exists ? '依赖不完整' : '未安装') }}
-                    </span>
-                  </div>
+
                 </div>
                 <p class="engine-desc">小红书开源的语音识别模型，用于字幕二次校正，可提升识别准确率。</p>
                 
@@ -1225,27 +1271,98 @@ const shortcutCategories = computed(() => {
                 </div>
                 
                 <div class="engine-content">
-                  <template v-if="!fireredStatus.ready">
-                    <el-button 
-                      type="primary" 
-                      :disabled="isInstallingFirered || !fireredStatus.uv_installed"
-                      @click="installFirered"
-                    >
-                      {{ isInstallingFirered ? '安装中...' : '安装环境' }}
-                    </el-button>
-                  </template>
-                  <template v-else>
-                    <div class="model-card single-model is-downloaded">
-                      <div class="model-card-header">
-                        <span class="model-name">FireRedASR-AED</span>
+                  <!-- GPU 版本卡片（仅在支持 CUDA 时显示，放在前面因为推荐） -->
+                  <div 
+                    v-if="supportsCuda" 
+                    class="env-version-card" 
+                    :class="{ 
+                      'is-active': fireredStatus.active_env === 'gpu' && fireredStatus.gpu_env.ready,
+                      'is-clickable': fireredStatus.gpu_env.ready && fireredStatus.active_env !== 'gpu'
+                    }"
+                    @click="fireredStatus.gpu_env.ready && fireredStatus.active_env !== 'gpu' && switchFireredVersion(true)"
+                  >
+                    <div class="env-version-left">
+                      <div class="env-version-radio">
+                        <span class="radio-dot" :class="{ active: fireredStatus.active_env === 'gpu' && fireredStatus.gpu_env.ready }"></span>
                       </div>
-                      <span class="model-size">~600 MB</span>
-                      <div class="model-card-actions" @click.stop>
-                        <el-button size="small" type="danger" plain @click="uninstallFirered">卸载</el-button>
+                      <div class="env-version-info">
+                        <span class="env-version-name">
+                          GPU 版本
+                          <span class="recommended-tag">推荐</span>
+                        </span>
+                        <span class="env-version-size">~2.5 GB（需要 NVIDIA 显卡和 CUDA）</span>
                       </div>
                     </div>
-                    
-                    <!-- FireRedASR 校正选项 -->
+                    <div class="env-version-actions" @click.stop>
+                      <template v-if="fireredStatus.gpu_env.ready">
+                        <el-button 
+                          size="small" 
+                          type="danger" 
+                          plain
+                          :disabled="isInstallingFirered"
+                          @click="uninstallFireredByType(true)"
+                        >
+                          卸载
+                        </el-button>
+                      </template>
+                      <template v-else>
+                        <el-button 
+                          size="small" 
+                          type="success"
+                          :disabled="isInstallingFirered || !fireredStatus.uv_installed"
+                          @click="installFirered(true)"
+                        >
+                          {{ isInstallingFirered && fireredInstallType === 'gpu' ? '安装中...' : '安装' }}
+                        </el-button>
+                      </template>
+                    </div>
+                  </div>
+                  
+                  <!-- CPU 版本卡片 -->
+                  <div 
+                    class="env-version-card" 
+                    :class="{ 
+                      'is-active': fireredStatus.active_env === 'cpu' && fireredStatus.cpu_env.ready,
+                      'is-clickable': fireredStatus.cpu_env.ready && fireredStatus.active_env !== 'cpu'
+                    }"
+                    @click="fireredStatus.cpu_env.ready && fireredStatus.active_env !== 'cpu' && switchFireredVersion(false)"
+                  >
+                    <div class="env-version-left">
+                      <div class="env-version-radio">
+                        <span class="radio-dot" :class="{ active: fireredStatus.active_env === 'cpu' && fireredStatus.cpu_env.ready }"></span>
+                      </div>
+                      <div class="env-version-info">
+                        <span class="env-version-name">CPU 版本</span>
+                        <span class="env-version-size">~200 MB</span>
+                      </div>
+                    </div>
+                    <div class="env-version-actions" @click.stop>
+                      <template v-if="fireredStatus.cpu_env.ready">
+                        <el-button 
+                          size="small" 
+                          type="danger" 
+                          plain
+                          :disabled="isInstallingFirered"
+                          @click="uninstallFireredByType(false)"
+                        >
+                          卸载
+                        </el-button>
+                      </template>
+                      <template v-else>
+                        <el-button 
+                          size="small" 
+                          type="primary"
+                          :disabled="isInstallingFirered || !fireredStatus.uv_installed"
+                          @click="installFirered(false)"
+                        >
+                          {{ isInstallingFirered && fireredInstallType === 'cpu' ? '安装中...' : '安装' }}
+                        </el-button>
+                      </template>
+                    </div>
+                  </div>
+                  
+                  <!-- FireRedASR 校正选项（仅在有环境就绪时显示） -->
+                  <template v-if="fireredStatus.ready">
                     <div class="engine-options">
                       <div class="option-row">
                         <div class="option-info">
