@@ -363,6 +363,49 @@ fn cancel_firered_task() {
     cancel_firered_correction();
 }
 
+/// 更新菜单项启用状态
+#[tauri::command]
+fn update_menu_item_enabled(app_handle: tauri::AppHandle, menu_id: String, enabled: bool) -> Result<(), String> {
+    use tauri::menu::MenuItemKind;
+    use tauri::Wry;
+    
+    if let Some(menu) = app_handle.menu() {
+        // 遍历菜单项查找目标
+        fn find_and_update(items: &[MenuItemKind<Wry>], menu_id: &str, enabled: bool) -> bool {
+            for item in items {
+                match item {
+                    MenuItemKind::MenuItem(menu_item) => {
+                        if menu_item.id().0 == menu_id {
+                            let _ = menu_item.set_enabled(enabled);
+                            return true;
+                        }
+                    }
+                    MenuItemKind::Submenu(submenu) => {
+                        if let Ok(sub_items) = submenu.items() {
+                            if find_and_update(&sub_items, menu_id, enabled) {
+                                return true;
+                            }
+                        }
+                    }
+                    MenuItemKind::Check(check_item) => {
+                        if check_item.id().0 == menu_id {
+                            let _ = check_item.set_enabled(enabled);
+                            return true;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            false
+        }
+        
+        if let Ok(items) = menu.items() {
+            find_and_update(&items, &menu_id, enabled);
+        }
+    }
+    Ok(())
+}
+
 /// 取消 FireRedASR 模型下载
 #[tauri::command]
 fn cancel_firered_model_download_cmd() {
@@ -513,6 +556,7 @@ fn update_recent_files_menu(app_handle: tauri::AppHandle, files: Vec<RecentFileI
             let close_tab_item = MenuItem::with_id(&app_handle, "close-tab", "关闭标签页", true, Some("CmdOrCtrl+W")).map_err(|e| e.to_string())?;
             let close_window_item = MenuItem::with_id(&app_handle, "close-window", "关闭窗口", true, Some("Cmd+Q")).map_err(|e| e.to_string())?;
             let add_dict_item = MenuItem::with_id(&app_handle, "add-to-dictionary", "添加到本地词典", true, Some("Cmd+D")).map_err(|e| e.to_string())?;
+            let clear_corrections_item = MenuItem::with_id(&app_handle, "clear-all-corrections", "清除所有校正标记", false, None::<&str>).map_err(|e| e.to_string())?;
             let file_menu = SubmenuBuilder::new(&app_handle, "文件")
                 .item(&open_item)
                 .item(&recent_menu)
@@ -536,6 +580,7 @@ fn update_recent_files_menu(app_handle: tauri::AppHandle, files: Vec<RecentFileI
                 .item(&add_dict_item)
                 .separator()
                 .text("batch-ai-correction", "批量 AI 字幕校正")
+                .item(&clear_corrections_item)
                 .separator()
                 .text("batch-add-cjk-spaces", "批量添加中英文空格")
                 .text("batch-remove-html", "批量移除HTML标签")
@@ -566,6 +611,7 @@ fn update_recent_files_menu(app_handle: tauri::AppHandle, files: Vec<RecentFileI
             let close_tab_item = MenuItem::with_id(&app_handle, "close-tab", "关闭标签页", true, Some("CmdOrCtrl+W")).map_err(|e| e.to_string())?;
             let close_window_item = MenuItem::with_id(&app_handle, "close-window", "关闭窗口", true, Some("Alt+F4")).map_err(|e| e.to_string())?;
             let add_dict_item = MenuItem::with_id(&app_handle, "add-to-dictionary", "添加到本地词典", true, Some("Ctrl+D")).map_err(|e| e.to_string())?;
+            let clear_corrections_item = MenuItem::with_id(&app_handle, "clear-all-corrections", "清除所有校正标记", false, None::<&str>).map_err(|e| e.to_string())?;
             let file_menu = SubmenuBuilder::new(&app_handle, "文件")
                 .item(&open_item)
                 .item(&recent_menu)
@@ -589,6 +635,7 @@ fn update_recent_files_menu(app_handle: tauri::AppHandle, files: Vec<RecentFileI
                 .item(&add_dict_item)
                 .separator()
                 .text("batch-ai-correction", "批量 AI 字幕校正")
+                .item(&clear_corrections_item)
                 .separator()
                 .text("batch-add-cjk-spaces", "批量添加中英文空格")
                 .text("batch-remove-html", "批量移除HTML标签")
@@ -681,6 +728,7 @@ pub fn run() {
                 let close_tab_item = MenuItem::with_id(app, "close-tab", "关闭标签页", true, Some("CmdOrCtrl+W"))?;
                 let close_window_item = MenuItem::with_id(app, "close-window", "关闭窗口", true, Some("Cmd+Q"))?;
                 let add_dict_item = MenuItem::with_id(app, "add-to-dictionary", "添加到本地词典", true, Some("Cmd+D"))?;
+                let clear_corrections_item = MenuItem::with_id(app, "clear-all-corrections", "清除所有校正标记", false, None::<&str>)?;
                 let file_menu = SubmenuBuilder::new(app, "文件")
                     .item(&open_item)
                     .item(&recent_menu)
@@ -705,6 +753,7 @@ pub fn run() {
                     .item(&add_dict_item)
                     .separator()
                     .text("batch-ai-correction", "批量 AI 字幕校正")
+                    .item(&clear_corrections_item)
                     .separator()
                     .text("batch-add-cjk-spaces", "批量添加中英文空格")
                     .text("batch-remove-html", "批量移除HTML标签")
@@ -751,6 +800,7 @@ pub fn run() {
                 let close_tab_item = MenuItem::with_id(app, "close-tab", "关闭标签页", true, Some("CmdOrCtrl+W"))?;
                 let close_window_item = MenuItem::with_id(app, "close-window", "关闭窗口", true, Some("Alt+F4"))?;
                 let add_dict_item = MenuItem::with_id(app, "add-to-dictionary", "添加到本地词典", true, Some("Ctrl+D"))?;
+                let clear_corrections_item = MenuItem::with_id(app, "clear-all-corrections", "清除所有校正标记", false, None::<&str>)?;
                 let file_menu = SubmenuBuilder::new(app, "文件")
                     .item(&open_item)
                     .item(&recent_menu)
@@ -775,6 +825,7 @@ pub fn run() {
                     .item(&add_dict_item)
                     .separator()
                     .text("batch-ai-correction", "批量 AI 字幕校正")
+                    .item(&clear_corrections_item)
                     .separator()
                     .text("batch-add-cjk-spaces", "批量添加中英文空格")
                     .text("batch-remove-html", "批量移除HTML标签")
@@ -845,6 +896,18 @@ pub fn run() {
                                 (async () => {
                                     if (window.__globalBatchAICorrection && typeof window.__globalBatchAICorrection === 'function') {
                                         await window.__globalBatchAICorrection();
+                                    }
+                                })();
+                            "#;
+                            let _ = window.eval(js_code);
+                        }
+                    }
+                    "clear-all-corrections" => {
+                        if let Some(window) = app_handle.get_webview_window("main") {
+                            let js_code = r#"
+                                (async () => {
+                                    if (window.__globalClearAllCorrections && typeof window.__globalClearAllCorrections === 'function') {
+                                        await window.__globalClearAllCorrections();
                                     }
                                 })();
                             "#;
@@ -1076,6 +1139,7 @@ pub fn run() {
             switch_firered,
             cancel_firered_task,
             cancel_firered_model_download_cmd,
+            update_menu_item_enabled,
             get_firered_models_cmd,
             download_firered_model_cmd,
             delete_firered_model_cmd,

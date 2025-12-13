@@ -20,7 +20,7 @@ import DictionaryPreviewDialog from '@/components/DictionaryPreviewDialog.vue'
 import QuickAddDictionaryDialog from '@/components/QuickAddDictionaryDialog.vue'
 import TitleBar from '@/components/TitleBar.vue'
 import { EditorSidebar, AudioEmptyState, TimelineControls, SubtitleListPanel, SubtitleEditPanel } from '@/components/editor'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage, ElMessageBox, ElLoading } from 'element-plus'
 
 const router = useRouter()
 const subtitleStore = useSubtitleStore()
@@ -152,6 +152,14 @@ watch(searchText, (query) => {
     selectedEntryId.value = subtitleStore.searchResults[0] ?? null
   }
 })
+
+// 监听校正标记数量变化，更新菜单项启用状态
+watch(() => subtitleStore.needsCorrectionCount, (count) => {
+  invoke('update_menu_item_enabled', {
+    menuId: 'clear-all-corrections',
+    enabled: count > 0
+  }).catch(err => console.error('Failed to update menu item:', err))
+}, { immediate: true })
 
 // 监听音频播放进度
 watch(() => audioStore.playerState.currentTime, (currentTime) => {
@@ -1188,6 +1196,45 @@ const handleDismissSuggestion = () => {
   }
 }
 
+// 清除所有校正标记
+const handleClearAllCorrections = async () => {
+  const count = subtitleStore.needsCorrectionCount
+  if (count === 0) {
+    ElMessage.info('没有需要清除的校正标记')
+    return
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      `确定要清除全部 ${count} 条校正标记吗？`,
+      '清除校正标记',
+      {
+        confirmButtonText: '清除',
+        cancelButtonText: '取消',
+        type: 'warning',
+        beforeClose: (action, instance, done) => {
+          if (action === 'confirm') {
+            instance.confirmButtonLoading = true
+            instance.confirmButtonText = '清除中...'
+
+            // 用 setTimeout 让 loading 状态先渲染，再执行清除
+            setTimeout(() => {
+              subtitleStore.clearAllCorrectionMarks()
+              showOnlyNeedsCorrection.value = false
+              done()
+              ElMessage.success(`已清除 ${count} 条校正标记`)
+            }, 50)
+          } else {
+            done()
+          }
+        },
+      }
+    )
+  } catch {
+    // 用户取消
+  }
+}
+
 // 返回欢迎页
 const goBack = async () => {
   if (audioStore.currentAudio) audioStore.unloadAudio()
@@ -1358,6 +1405,7 @@ onMounted(async () => {
     ;(window as any).__handleMenuOpenFile = async () => await handleOpenFile()
     ;(window as any).__handleMenuSave = async () => await handleSave()
     ;(window as any).__globalBatchAICorrection = async () => await startCorrection()
+    ;(window as any).__globalClearAllCorrections = () => handleClearAllCorrections()
     ;(window as any).__globalApplyDictionary = async () => await handleApplyDictionary()
     ;(window as any).__globalQuickAddDictionary = async () => handleQuickAddFromSelection()
     unlistenOpenFile = await listen<void>('menu:open-file', async () => await handleOpenFile())
@@ -1375,6 +1423,7 @@ onBeforeUnmount(() => {
   ;(window as any).__handleMenuOpenFile = null
   ;(window as any).__handleMenuSave = null
   ;(window as any).__globalBatchAICorrection = null
+  ;(window as any).__globalClearAllCorrections = null
   ;(window as any).__globalApplyDictionary = null
   ;(window as any).__globalQuickAddDictionary = null
   document.removeEventListener('keydown', handleKeydown, true)
