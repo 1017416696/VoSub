@@ -1292,6 +1292,9 @@ pub async fn transcribe_with_sensevoice(
 ) -> Result<Vec<SubtitleEntry>, String> {
     reset_cancellation();
     
+    // 记录开始时间
+    let start_time = std::time::Instant::now();
+    
     // 检查环境
     let env_status = check_sensevoice_env();
     if !env_status.ready {
@@ -1328,6 +1331,15 @@ pub async fn transcribe_with_sensevoice(
         "yue" => "yue",  // 粤语
         _ => "auto",
     };
+    
+    // 确定设备
+    let device = if env_status.is_gpu { "cuda" } else { "cpu" };
+    
+    // 记录开始日志
+    log::info!(
+        "开始语音转录: 音频文件={}, 模型=SenseVoiceSmall, 语言={}, 设备={}",
+        audio_path, lang_code, device
+    );
     
     // 使用 spawn 启动进程，以便异步读取 stderr
     use std::process::Stdio;
@@ -1465,10 +1477,19 @@ pub async fn transcribe_with_sensevoice(
         });
     }
     
+    // 计算耗时
+    let elapsed = start_time.elapsed();
+    let elapsed_secs = elapsed.as_secs_f64();
+    
+    log::info!(
+        "语音转录完成: 音频文件={}, 模型=SenseVoiceSmall, 耗时={:.2}秒, 生成{}条字幕",
+        audio_path, elapsed_secs, entries.len()
+    );
+    
     // 发送完成
     let _ = window.emit("transcription-progress", SenseVoiceProgress {
         progress: 100.0,
-        current_text: format!("转录完成！生成了 {} 条字幕", entries.len()),
+        current_text: format!("转录完成！生成了 {} 条字幕，耗时 {:.1} 秒", entries.len(), elapsed_secs),
         status: "completed".to_string(),
     });
     
