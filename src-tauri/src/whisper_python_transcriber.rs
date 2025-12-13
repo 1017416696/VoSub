@@ -673,16 +673,35 @@ fn write_transcription_script() -> Result<(), String> {
     let script_content = r#"#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Whisper 转录脚本 - 使用 faster-whisper
+Whisper 转录脚本 - 使用 faster-whisper（带实时进度）
 """
 
 import sys
+import os
 import json
 import argparse
+
+# 强制禁用输出缓冲
+os.environ["PYTHONUNBUFFERED"] = "1"
+
 from faster_whisper import WhisperModel
 
-def transcribe(audio_path: str, model_size: str, language: str, device: str = "auto"):
-    """转录音频文件"""
+def log(msg):
+    """输出日志并立即刷新"""
+    print(msg, flush=True)
+    sys.stdout.flush()
+
+def get_audio_duration(audio_path: str) -> float:
+    """获取音频时长（秒）"""
+    try:
+        from pydub import AudioSegment
+        audio = AudioSegment.from_file(audio_path)
+        return len(audio) / 1000.0
+    except:
+        return 0.0
+
+def transcribe(audio_path: str, model_size: str, language: str, device: str = "auto", output_path: str = None):
+    """转录音频文件，实时输出进度"""
     
     # 确定设备
     if device == "auto":
@@ -694,10 +713,20 @@ def transcribe(audio_path: str, model_size: str, language: str, device: str = "a
     else:
         compute_type = "int8"
     
+    # 输出加载状态
+    log("STATUS:loading")
+    
+    # 预先获取音频时长用于进度估算
+    audio_duration = get_audio_duration(audio_path)
+    log(f"DURATION:{audio_duration:.1f}")
+    
     # 加载模型
     model = WhisperModel(model_size, device=device, compute_type=compute_type)
     
-    # 转录
+    # 输出转录状态，同时传递估算信息
+    log("STATUS:transcribing")
+    
+    # 转录 - segments 是生成器
     segments, info = model.transcribe(
         audio_path,
         language=language if language != "auto" else None,
@@ -706,7 +735,9 @@ def transcribe(audio_path: str, model_size: str, language: str, device: str = "a
         vad_parameters=dict(min_silence_duration_ms=500),
     )
     
-    # 收集结果
+    total_duration = info.duration if info.duration and info.duration > 0 else audio_duration or 1.0
+    
+    # 收集结果，输出每个 segment 的进度
     results = []
     for segment in segments:
         results.append({
@@ -714,12 +745,25 @@ def transcribe(audio_path: str, model_size: str, language: str, device: str = "a
             "end": segment.end,
             "text": segment.text.strip()
         })
+        
+        # 基于实际 segment 更新进度
+        progress = min((segment.end / total_duration) * 100, 95.0)
+        text_preview = segment.text.strip()[:30]
+        log(f"PROGRESS:{progress:.1f}:{text_preview}")
     
-    return {
+    # 写入结果文件
+    result = {
         "segments": results,
         "language": info.language,
         "duration": info.duration
     }
+    
+    if output_path:
+        with open(output_path, "w", encoding="utf-8") as f:
+            json.dump(result, f, ensure_ascii=False, indent=2)
+    
+    log("STATUS:completed")
+    return result
 
 def main():
     parser = argparse.ArgumentParser(description="Whisper 转录")
@@ -732,14 +776,10 @@ def main():
     args = parser.parse_args()
     
     try:
-        result = transcribe(args.audio, args.model, args.language, args.device)
-        
-        with open(args.output, "w", encoding="utf-8") as f:
-            json.dump(result, f, ensure_ascii=False, indent=2)
-        
-        print(json.dumps({"status": "success", "segments": len(result["segments"])}))
+        result = transcribe(args.audio, args.model, args.language, args.device, args.output)
+        log(json.dumps({"status": "success", "segments": len(result["segments"])}))
     except Exception as e:
-        print(json.dumps({"status": "error", "message": str(e)}), file=sys.stderr)
+        print(f"ERROR:{str(e)}", file=sys.stderr, flush=True)
         sys.exit(1)
 
 if __name__ == "__main__":
@@ -777,6 +817,9 @@ pub async fn transcribe_with_whisper(
     language: String,
     window: Window,
 ) -> Result<Vec<SubtitleEntry>, String> {
+    use std::io::{BufRead, BufReader};
+    use std::process::Stdio;
+    
     reset_cancellation();
     
     // 记录开始时间
@@ -792,20 +835,18 @@ pub async fn transcribe_with_whisper(
     let scripts_dir = get_scripts_dir()?;
     let script_path = scripts_dir.join("whisper_transcribe.py");
     
-    // 确保脚本存在
-    if !script_path.exists() {
-        write_transcription_script()?;
-    }
+    // 总是更新脚本以确保使用最新版本
+    write_transcription_script()?;
     
     // 创建临时输出文件
     let temp_dir = std::env::temp_dir();
     let output_path = temp_dir.join(format!("whisper_result_{}.json", std::process::id()));
     
-    // 发送进度
+    // 发送初始进度
     let _ = window.emit("transcription-progress", WhisperProgress {
-        progress: 10.0,
-        current_text: "正在加载 Whisper 模型...".to_string(),
-        status: "loading".to_string(),
+        progress: 0.0,
+        current_text: "正在启动转录...".to_string(),
+        status: "starting".to_string(),
     });
     
     if is_cancelled() {
@@ -815,19 +856,20 @@ pub async fn transcribe_with_whisper(
     // 确定设备
     let device = if env_status.is_gpu { "cuda" } else { "cpu" };
     
-    // 记录开始日志（包含完整模型名称和设备信息）
+    // 记录开始日志
     log::info!(
         "开始语音转录: 音频文件={}, 模型=faster-whisper-{}, 语言={}, 设备={}",
         audio_path, model_size, language, device
     );
     
-    // 运行 Python 脚本
+    // 运行 Python 脚本，使用 Stdio::piped() 实时读取输出
     #[cfg(target_os = "windows")]
-    let output = {
+    let mut child = {
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x08000000;
         Command::new(&python_path)
             .args([
+                "-u",  // unbuffered output
                 script_path.to_str().unwrap(),
                 "--audio", &audio_path,
                 "--model", &model_size,
@@ -835,14 +877,17 @@ pub async fn transcribe_with_whisper(
                 "--device", device,
                 "--output", output_path.to_str().unwrap(),
             ])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
             .creation_flags(CREATE_NO_WINDOW)
-            .output()
+            .spawn()
             .map_err(|e| format!("运行转录脚本失败: {}", e))?
     };
     
     #[cfg(not(target_os = "windows"))]
-    let output = Command::new(&python_path)
+    let mut child = Command::new(&python_path)
         .args([
+            "-u",  // unbuffered output
             script_path.to_str().unwrap(),
             "--audio", &audio_path,
             "--model", &model_size,
@@ -850,26 +895,176 @@ pub async fn transcribe_with_whisper(
             "--device", device,
             "--output", output_path.to_str().unwrap(),
         ])
-        .output()
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
         .map_err(|e| format!("运行转录脚本失败: {}", e))?;
+    
+    // 获取 stdout 和 stderr
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+    
+    // 用于进度模拟的共享状态
+    let audio_duration = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let is_transcribing = Arc::new(AtomicBool::new(false));
+    let transcribe_done = Arc::new(AtomicBool::new(false));
+    let current_progress = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    
+    let window_clone = window.clone();
+    let audio_duration_clone = audio_duration.clone();
+    let is_transcribing_clone = is_transcribing.clone();
+    let transcribe_done_clone = transcribe_done.clone();
+    let current_progress_clone = current_progress.clone();
+    
+    // 在后台线程读取 stdout，解析进度
+    let stdout_handle = std::thread::spawn(move || {
+        if let Some(stdout) = stdout {
+            let reader = BufReader::new(stdout);
+            for line in reader.lines().flatten() {
+                log::debug!("Whisper transcribe: {}", line);
+                
+                // 解析 DURATION:xxx 格式
+                if line.starts_with("DURATION:") {
+                    if let Ok(duration) = line.trim_start_matches("DURATION:").parse::<f64>() {
+                        audio_duration_clone.store((duration * 1000.0) as u64, Ordering::SeqCst);
+                    }
+                    continue;
+                }
+                
+                // 解析 STATUS:xxx 格式
+                if line.starts_with("STATUS:") {
+                    let status = line.trim_start_matches("STATUS:");
+                    let (progress, text, status_str) = match status {
+                        "loading" => (5.0, "正在加载 Whisper 模型...".to_string(), "loading"),
+                        "transcribing" => {
+                            is_transcribing_clone.store(true, Ordering::SeqCst);
+                            (10.0, "模型加载完成，开始转录...".to_string(), "transcribing")
+                        },
+                        "completed" => {
+                            transcribe_done_clone.store(true, Ordering::SeqCst);
+                            (99.0, "转录完成，正在处理结果...".to_string(), "processing")
+                        },
+                        _ => continue,
+                    };
+                    current_progress_clone.store((progress * 100.0) as u64, Ordering::SeqCst);
+                    let _ = window_clone.emit("transcription-progress", WhisperProgress {
+                        progress,
+                        current_text: text,
+                        status: status_str.to_string(),
+                    });
+                }
+                // 解析 PROGRESS:百分比:文本 格式
+                else if line.starts_with("PROGRESS:") {
+                    let content = line.trim_start_matches("PROGRESS:");
+                    if let Some((pct_str, text)) = content.split_once(':') {
+                        if let Ok(pct) = pct_str.parse::<f32>() {
+                            // 将进度映射到 10-95 范围
+                            let mapped_progress = 10.0 + (pct * 0.85);
+                            current_progress_clone.store((mapped_progress * 100.0) as u64, Ordering::SeqCst);
+                            let _ = window_clone.emit("transcription-progress", WhisperProgress {
+                                progress: mapped_progress,
+                                current_text: format!("正在转录: {}", text),
+                                status: "transcribing".to_string(),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    });
+    
+    // stderr 读取线程
+    let stderr_handle = std::thread::spawn(move || {
+        let mut stderr_output = String::new();
+        if let Some(stderr) = stderr {
+            let reader = BufReader::new(stderr);
+            for line in reader.lines().flatten() {
+                if line.contains("ERROR") || line.contains("error") || line.contains("Error") {
+                    log::error!("Whisper transcribe error: {}", line);
+                    stderr_output.push_str(&line);
+                    stderr_output.push('\n');
+                } else {
+                    log::debug!("Whisper transcribe stderr: {}", line);
+                }
+            }
+        }
+        stderr_output
+    });
+    
+    // 进度模拟线程 - 在 Rust 端模拟进度
+    let window_for_progress = window.clone();
+    let model_size_clone = model_size.clone();
+    let is_gpu = env_status.is_gpu;
+    let progress_handle = std::thread::spawn(move || {
+        // 等待转录开始
+        while !is_transcribing.load(Ordering::SeqCst) && !transcribe_done.load(Ordering::SeqCst) {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        
+        if transcribe_done.load(Ordering::SeqCst) {
+            return;
+        }
+        
+        let duration_ms = audio_duration.load(Ordering::SeqCst);
+        if duration_ms == 0 {
+            return;
+        }
+        
+        let duration_secs = duration_ms as f64 / 1000.0;
+        
+        // 根据模型大小和设备估算处理速度（相对于实时播放速度的倍数）
+        // GPU 通常比实时快很多，根据你的实际测试调整
+        let speed_factor = if is_gpu { 12.0 } else { 2.0 };
+        let model_factor = match model_size_clone.as_str() {
+            "tiny" => 3.0,
+            "base" => 2.0,
+            "small" => 1.2,
+            "medium" => 0.8,
+            "large-v2" | "large-v3" => 0.55,
+            _ => 1.0,
+        };
+        let estimated_time = duration_secs / (speed_factor * model_factor);
+        
+        let start_time = std::time::Instant::now();
+        
+        while !transcribe_done.load(Ordering::SeqCst) {
+            let elapsed = start_time.elapsed().as_secs_f64();
+            // 使用非线性进度曲线
+            let simulated_progress = ((elapsed / estimated_time).powf(0.7) * 85.0).min(85.0);
+            let mapped_progress = 10.0 + simulated_progress;
+            
+            // 只有当模拟进度大于当前进度时才更新
+            let current = current_progress.load(Ordering::SeqCst) as f64 / 100.0;
+            if mapped_progress > current {
+                current_progress.store((mapped_progress * 100.0) as u64, Ordering::SeqCst);
+                let _ = window_for_progress.emit("transcription-progress", WhisperProgress {
+                    progress: mapped_progress as f32,
+                    current_text: "正在识别语音内容...".to_string(),
+                    status: "transcribing".to_string(),
+                });
+            }
+            
+            std::thread::sleep(std::time::Duration::from_millis(500));
+        }
+    });
+    
+    // 等待所有线程完成
+    let _ = stdout_handle.join();
+    let stderr_output = stderr_handle.join().unwrap_or_default();
+    let _ = progress_handle.join();
+    
+    // 等待进程结束
+    let status = child.wait().map_err(|e| format!("等待转录完成失败: {}", e))?;
     
     if is_cancelled() {
         let _ = std::fs::remove_file(&output_path);
         return Err("转录已取消".to_string());
     }
     
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
+    if !status.success() {
         let _ = std::fs::remove_file(&output_path);
-        return Err(format!("转录失败: {}", stderr));
+        return Err(format!("转录失败: {}", stderr_output));
     }
-    
-    // 发送进度
-    let _ = window.emit("transcription-progress", WhisperProgress {
-        progress: 80.0,
-        current_text: "正在处理转录结果...".to_string(),
-        status: "processing".to_string(),
-    });
     
     // 读取结果
     let result_json = std::fs::read_to_string(&output_path)
@@ -923,6 +1118,9 @@ pub async fn transcribe_with_whisper(
         current_text: format!("转录完成！共生成 {} 条字幕，耗时 {:.1} 秒", entries.len(), elapsed_secs),
         status: "completed".to_string(),
     });
+    
+    // 短暂延迟让前端有时间显示 100% 进度
+    std::thread::sleep(std::time::Duration::from_millis(500));
     
     Ok(entries)
 }

@@ -86,9 +86,9 @@ const isSensevoiceTranscribing = computed(() => {
   return configStore.transcriptionEngine === 'sensevoice' && isTranscribing.value && !isInstallingSensevoice.value
 })
 
-// 是否显示真实进度条（下载模型或 SenseVoice 转录时）
+// 是否显示真实进度条（转录时都显示）
 const showRealProgress = computed(() => {
-  return isDownloading.value || isSensevoiceTranscribing.value
+  return isTranscribing.value && !isInstallingSensevoice.value
 })
 
 // 本地化消息
