@@ -229,8 +229,25 @@ interface WhisperModelInfo {
   name: string
   size: string
   downloaded: boolean
-  path?: string
-  partial_size?: number // 部分下载的字节数
+  partial_size?: number
+}
+
+// 单个 Whisper 环境的状态
+interface WhisperEnvInfo {
+  installed: boolean
+  ready: boolean
+}
+
+// Whisper 环境状态
+interface WhisperEnvStatus {
+  uv_installed: boolean
+  cpu_env: WhisperEnvInfo
+  gpu_env: WhisperEnvInfo
+  active_env: string  // "cpu", "gpu", or "none"
+  // 兼容旧字段
+  env_exists: boolean
+  ready: boolean
+  is_gpu: boolean
 }
 
 // 单个环境的状态
@@ -277,10 +294,24 @@ interface FireRedEnvStatus {
   is_gpu: boolean
 }
 
+// Whisper 相关
+const whisperStatus = ref<WhisperEnvStatus>({ 
+  uv_installed: false, 
+  cpu_env: { installed: false, ready: false },
+  gpu_env: { installed: false, ready: false },
+  active_env: 'none',
+  env_exists: false, 
+  ready: false, 
+  is_gpu: false 
+})
+const whisperInstallType = ref<'cpu' | 'gpu'>('cpu')
 const whisperModels = ref<WhisperModelInfo[]>([])
 const downloadingModel = ref<string | null>(null)
 const downloadProgress = ref(0)
 const downloadMessage = ref('')
+const isInstallingWhisper = ref(false)
+const whisperProgress = ref(0)
+const whisperMessage = ref('')
 
 // SenseVoice 相关
 const sensevoiceStatus = ref<SenseVoiceEnvStatus>({ 
@@ -328,11 +359,85 @@ const isInstallingFirered = ref(false)
 const fireredProgress = ref(0)
 const fireredMessage = ref('')
 
+const fetchWhisperStatus = async () => {
+  try {
+    whisperStatus.value = await invoke<WhisperEnvStatus>('check_whisper_env_status')
+  } catch (e) {
+    console.error('Failed to fetch whisper status:', e)
+  }
+}
+
 const fetchWhisperModels = async () => {
   try {
-    whisperModels.value = await invoke<WhisperModelInfo[]>('get_whisper_models')
+    whisperModels.value = await invoke<WhisperModelInfo[]>('get_whisper_models_cmd')
   } catch (e) {
     console.error('Failed to fetch whisper models:', e)
+  }
+}
+
+// 安装指定版本的 Whisper
+const installWhisper = async (useGpu: boolean = false) => {
+  if (!whisperStatus.value.uv_installed) {
+    ElMessage.warning('请先安装 uv 包管理器')
+    return
+  }
+  
+  isInstallingWhisper.value = true
+  whisperProgress.value = 0
+  whisperInstallType.value = useGpu ? 'gpu' : 'cpu'
+  const versionType = useGpu ? 'GPU' : 'CPU'
+  whisperMessage.value = `准备安装 ${versionType} 版本...`
+  
+  // 监听安装进度
+  const unlisten = await listen<{ progress: number; current_text: string }>('whisper-progress', (event) => {
+    whisperProgress.value = event.payload.progress
+    whisperMessage.value = event.payload.current_text
+  })
+  
+  try {
+    await invoke('install_whisper', { useGpu })
+    await fetchWhisperStatus()
+    ElMessage.success(`Whisper ${versionType} 版本安装成功`)
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error)
+    ElMessage.error(`安装失败：${formatDownloadError(errorMsg)}`)
+  } finally {
+    isInstallingWhisper.value = false
+    unlisten()
+  }
+}
+
+// 卸载指定版本的 Whisper
+const uninstallWhisperByType = async (useGpu: boolean) => {
+  const versionType = useGpu ? 'GPU' : 'CPU'
+  try {
+    await ElMessageBox.confirm(
+      `确定要卸载 Whisper ${versionType} 环境吗？这将删除该版本的所有相关文件。`,
+      '卸载确认',
+      {
+        confirmButtonText: '卸载',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+    await invoke('uninstall_whisper_by_type', { useGpu })
+    await fetchWhisperStatus()
+    ElMessage.success(`Whisper ${versionType} 环境已卸载`)
+  } catch (e) {
+    if (e !== 'cancel') {
+      ElMessage.error(`卸载失败：${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
+}
+
+// 切换当前使用的 Whisper 版本
+const switchWhisperVersion = async (useGpu: boolean) => {
+  try {
+    await invoke('switch_whisper', { useGpu })
+    await fetchWhisperStatus()
+    ElMessage.success(`已切换到 ${useGpu ? 'GPU' : 'CPU'} 版本`)
+  } catch (e) {
+    ElMessage.error(`切换失败：${e instanceof Error ? e.message : String(e)}`)
   }
 }
 
@@ -370,8 +475,8 @@ const fetchFireredModels = async () => {
 
 // 重新检测 uv 安装状态
 const recheckUvStatus = async () => {
-  await Promise.all([fetchSensevoiceStatus(), fetchFireredStatus()])
-  if (sensevoiceStatus.value.uv_installed || fireredStatus.value.uv_installed) {
+  await Promise.all([fetchWhisperStatus(), fetchSensevoiceStatus(), fetchFireredStatus()])
+  if (whisperStatus.value.uv_installed || sensevoiceStatus.value.uv_installed || fireredStatus.value.uv_installed) {
     ElMessage.success('检测到 uv 已安装')
   } else {
     ElMessage.warning('未检测到 uv，请确认已安装并重启应用')
@@ -702,40 +807,48 @@ const formatDownloadError = (error: string): string => {
   return '下载失败，请检查网络后重试'
 }
 
+// 下载 Whisper 模型
 const downloadWhisperModel = async (modelName: string) => {
+  if (!whisperStatus.value.ready) {
+    ElMessage.warning('请先安装 Whisper 环境')
+    return
+  }
+  
   downloadingModel.value = modelName
   downloadProgress.value = 0
   downloadMessage.value = '准备下载...'
-
+  
+  // 监听下载进度
+  const unlisten = await listen<{ progress: number; current_text: string }>('whisper-model-progress', (event) => {
+    downloadProgress.value = event.payload.progress
+    downloadMessage.value = event.payload.current_text
+  })
+  
   try {
-    await invoke('download_whisper_model', { modelSize: modelName })
+    await invoke('download_whisper_model_cmd', { modelName })
     await fetchWhisperModels()
     ElMessage.success(`模型 ${modelName} 下载完成`)
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error)
-    // 忽略因新下载任务启动或用户取消的错误
-    if (
-      !errorMsg.includes('cancelled') &&
-      !errorMsg.includes('new download started')
-    ) {
+    if (!errorMsg.includes('cancelled') && !errorMsg.includes('取消')) {
       ElMessage.error(`下载失败：${formatDownloadError(errorMsg)}`)
     }
   } finally {
     downloadingModel.value = null
-    // 刷新模型列表以更新部分下载状态
+    unlisten()
     await fetchWhisperModels()
   }
 }
 
-const cancelWhisperDownload = async () => {
+// 取消 Whisper 模型下载
+const cancelWhisperModelDownload = async () => {
   try {
-    await invoke('cancel_whisper_download')
+    await invoke('cancel_whisper_model_download_cmd')
     downloadingModel.value = null
     ElMessage.info('下载已取消')
-    // 刷新模型列表以更新部分下载状态
     await fetchWhisperModels()
   } catch (e) {
-    console.error('Failed to cancel download:', e)
+    console.error('取消下载失败:', e)
     downloadingModel.value = null
   }
 }
@@ -743,7 +856,7 @@ const cancelWhisperDownload = async () => {
 const deleteWhisperModel = async (modelName: string) => {
   try {
     await ElMessageBox.confirm(`确定要卸载模型 ${modelName} 吗？`, '卸载确认', { confirmButtonText: '卸载', cancelButtonText: '取消', type: 'warning' })
-    await invoke('delete_whisper_model', { modelSize: modelName })
+    await invoke('delete_whisper_model_cmd', { modelSize: modelName })
     await fetchWhisperModels()
     ElMessage.success(`模型 ${modelName} 已卸载`)
   } catch (e) {
@@ -755,7 +868,7 @@ const deleteWhisperModel = async (modelName: string) => {
 
 const openModelDir = async () => {
   try {
-    await invoke('open_whisper_model_dir')
+    await invoke('open_whisper_model_dir_cmd')
   } catch (e) {
     ElMessage.error('无法打开模型目录')
   }
@@ -768,9 +881,8 @@ const setDefaultModel = (modelName: string) => {
   ElMessage.success(`已将 Whisper ${modelName} 设为默认模型`)
 }
 
-// 监听下载进度
+// 监听进度事件
 import { listen } from '@tauri-apps/api/event'
-let unlistenProgress: (() => void) | null = null
 
 // 日志文件路径
 const logPath = ref('')
@@ -806,20 +918,16 @@ const copyLogPath = async () => {
 // 初始化时获取日志路径
 fetchLogPath()
 
-// 初始化时获取 Whisper 模型列表并监听下载进度
-const setupWhisperListener = async () => {
+// 初始化时获取状态
+const setupListeners = async () => {
+  await fetchWhisperStatus()
   await fetchWhisperModels()
   await fetchSensevoiceStatus()
   await fetchSensevoiceModels()
   await fetchFireredStatus()
   await fetchFireredModels()
-  // 使用专门的 model-download-progress 事件，避免与转录进度冲突
-  unlistenProgress = await listen<{ progress: number; current_text: string }>('model-download-progress', (event) => {
-    downloadProgress.value = event.payload.progress
-    downloadMessage.value = event.payload.current_text
-  })
 }
-setupWhisperListener()
+setupListeners()
 
 // 联系方式
 const contactInfo = {
@@ -868,6 +976,7 @@ watch(
     if (visible) {
       document.addEventListener('keydown', handleKeydown, true)
       // 每次打开对话框时刷新状态
+      fetchWhisperStatus()
       fetchWhisperModels()
       fetchSensevoiceStatus()
       fetchFireredStatus()
@@ -880,7 +989,6 @@ watch(
 // 组件卸载时清理
 onBeforeUnmount(() => {
   document.removeEventListener('keydown', handleKeydown, true)
-  if (unlistenProgress) unlistenProgress()
 })
 
 // 检测平台
@@ -1145,67 +1253,185 @@ const shortcutCategories = computed(() => {
                     </svg>
                   </div>
                   <div class="engine-info">
-                    <h3 class="engine-title">Whisper</h3>
+                    <h3 class="engine-title">Whisper (faster-whisper)</h3>
                     <span class="engine-badge">OpenAI</span>
                   </div>
                 </div>
-                <p class="engine-desc">OpenAI 开发的语音识别模型，支持多语言，模型越大精度越高。</p>
+                <p class="engine-desc">OpenAI 开发的语音识别模型，使用 faster-whisper 加速推理，支持多语言。</p>
                 
-                <div class="models-grid">
-                  <div
-                    v-for="model in whisperModels"
-                    :key="model.name"
-                    class="model-card"
+                <div v-if="!whisperStatus.uv_installed" class="env-warning">
+                  <span class="warning-icon">⚠️</span>
+                  <span>需要先安装 <a href="https://docs.astral.sh/uv/getting-started/installation/" target="_blank">uv 包管理器</a></span>
+                  <el-button size="small" type="primary" link @click="recheckUvStatus">重新检测</el-button>
+                </div>
+                
+                <div v-if="isInstallingWhisper" class="install-progress-card">
+                  <el-progress :percentage="Math.round(whisperProgress)" :stroke-width="6" />
+                  <span class="install-message">{{ whisperMessage }}</span>
+                </div>
+                
+                <div class="engine-content">
+                  <!-- GPU 版本卡片（仅在支持 CUDA 时显示） -->
+                  <div 
+                    v-if="supportsCuda" 
+                    class="env-version-card" 
                     :class="{ 
-                      'is-selected': model.downloaded && configStore.transcriptionEngine === 'whisper' && configStore.whisperModel === model.name, 
-                      'is-downloaded': model.downloaded,
-                      'is-downloading': downloadingModel === model.name
+                      'is-active': whisperStatus.active_env === 'gpu' && whisperStatus.gpu_env.ready,
+                      'is-clickable': whisperStatus.gpu_env.ready && whisperStatus.active_env !== 'gpu'
                     }"
-                    @click="model.downloaded && setDefaultModel(model.name)"
+                    @click="whisperStatus.gpu_env.ready && whisperStatus.active_env !== 'gpu' && switchWhisperVersion(true)"
                   >
-                    <div class="model-card-header">
-                      <div class="model-select-indicator">
-                        <span class="select-dot" :class="{ 
-                          active: model.downloaded && configStore.transcriptionEngine === 'whisper' && configStore.whisperModel === model.name,
-                          disabled: !model.downloaded 
-                        }"></span>
+                    <div class="env-version-left">
+                      <div class="env-version-radio">
+                        <span class="radio-dot" :class="{ active: whisperStatus.active_env === 'gpu' && whisperStatus.gpu_env.ready }"></span>
                       </div>
-                      <span class="model-name">{{ model.name }}</span>
+                      <div class="env-version-info">
+                        <span class="env-version-name">
+                          GPU 版本
+                          <span class="recommended-tag">推荐</span>
+                        </span>
+                        <span class="env-version-size">~2.5 GB（需要 NVIDIA 显卡和 CUDA）</span>
+                      </div>
                     </div>
-                    <span class="model-size">{{ model.size }}</span>
-                    <div class="model-card-actions" @click.stop>
-                      <template v-if="downloadingModel === model.name">
-                        <div class="download-progress-inline">
-                          <el-progress :percentage="Math.round(downloadProgress)" :stroke-width="4" :show-text="false" />
-                          <span class="progress-text">{{ Math.round(downloadProgress) }}%</span>
-                        </div>
-                        <el-button size="small" type="info" plain @click="cancelWhisperDownload">取消</el-button>
+                    <div class="env-version-actions" @click.stop>
+                      <template v-if="whisperStatus.gpu_env.ready">
+                        <el-button 
+                          size="small" 
+                          type="danger" 
+                          plain
+                          :disabled="isInstallingWhisper"
+                          @click="uninstallWhisperByType(true)"
+                        >
+                          卸载
+                        </el-button>
                       </template>
                       <template v-else>
-                        <template v-if="!model.downloaded">
-                          <el-button 
-                            v-if="model.partial_size" 
-                            size="small" 
-                            type="success" 
-                            :disabled="!!downloadingModel" 
-                            @click="downloadWhisperModel(model.name)"
-                          >
-                            继续下载
-                          </el-button>
-                          <el-button 
-                            v-else 
-                            size="small" 
-                            type="primary" 
-                            :disabled="!!downloadingModel" 
-                            @click="downloadWhisperModel(model.name)"
-                          >
-                            下载
-                          </el-button>
-                        </template>
-                        <el-button v-else size="small" type="danger" plain :disabled="!!downloadingModel || (configStore.transcriptionEngine === 'whisper' && configStore.whisperModel === model.name)" @click="deleteWhisperModel(model.name)">卸载</el-button>
+                        <el-button 
+                          size="small" 
+                          type="success"
+                          :disabled="isInstallingWhisper || !whisperStatus.uv_installed"
+                          @click="installWhisper(true)"
+                        >
+                          {{ isInstallingWhisper && whisperInstallType === 'gpu' ? '安装中...' : '安装' }}
+                        </el-button>
                       </template>
                     </div>
                   </div>
+                  
+                  <!-- CPU 版本卡片 -->
+                  <div 
+                    class="env-version-card" 
+                    :class="{ 
+                      'is-active': whisperStatus.active_env === 'cpu' && whisperStatus.cpu_env.ready,
+                      'is-clickable': whisperStatus.cpu_env.ready && whisperStatus.active_env !== 'cpu'
+                    }"
+                    @click="whisperStatus.cpu_env.ready && whisperStatus.active_env !== 'cpu' && switchWhisperVersion(false)"
+                  >
+                    <div class="env-version-left">
+                      <div class="env-version-radio">
+                        <span class="radio-dot" :class="{ active: whisperStatus.active_env === 'cpu' && whisperStatus.cpu_env.ready }"></span>
+                      </div>
+                      <div class="env-version-info">
+                        <span class="env-version-name">CPU 版本</span>
+                        <span class="env-version-size">~200 MB</span>
+                      </div>
+                    </div>
+                    <div class="env-version-actions" @click.stop>
+                      <template v-if="whisperStatus.cpu_env.ready">
+                        <el-button 
+                          size="small" 
+                          type="danger" 
+                          plain
+                          :disabled="isInstallingWhisper"
+                          @click="uninstallWhisperByType(false)"
+                        >
+                          卸载
+                        </el-button>
+                      </template>
+                      <template v-else>
+                        <el-button 
+                          size="small" 
+                          type="primary"
+                          :disabled="isInstallingWhisper || !whisperStatus.uv_installed"
+                          @click="installWhisper(false)"
+                        >
+                          {{ isInstallingWhisper && whisperInstallType === 'cpu' ? '安装中...' : '安装' }}
+                        </el-button>
+                      </template>
+                    </div>
+                  </div>
+                  
+                  <!-- 模型选择（只有环境就绪时显示） -->
+                  <template v-if="whisperStatus.ready">
+                    <div class="sensevoice-models-section">
+                      <div class="section-subtitle">模型</div>
+                      <div class="models-grid">
+                        <div
+                          v-for="model in whisperModels"
+                          :key="model.name"
+                          class="model-card"
+                          :class="{ 
+                            'is-selected': model.downloaded && configStore.transcriptionEngine === 'whisper' && configStore.whisperModel === model.name,
+                            'is-downloaded': model.downloaded,
+                            'is-downloading': downloadingModel === model.name
+                          }"
+                          @click="model.downloaded && setDefaultModel(model.name)"
+                        >
+                          <div class="model-card-header">
+                            <div class="model-select-indicator">
+                              <span class="select-dot" :class="{ 
+                                active: model.downloaded && configStore.transcriptionEngine === 'whisper' && configStore.whisperModel === model.name,
+                                disabled: !model.downloaded
+                              }"></span>
+                            </div>
+                            <span class="model-name">{{ model.name }}</span>
+                          </div>
+                          <span class="model-size">{{ model.size }}</span>
+                          <div class="model-card-actions" @click.stop>
+                            <template v-if="downloadingModel === model.name">
+                              <div class="download-progress-inline">
+                                <el-progress :percentage="Math.round(downloadProgress)" :stroke-width="4" :show-text="false" />
+                                <span class="progress-text">{{ Math.round(downloadProgress) }}%</span>
+                              </div>
+                              <el-button size="small" type="info" plain @click="cancelWhisperModelDownload">取消</el-button>
+                            </template>
+                            <template v-else>
+                              <template v-if="!model.downloaded">
+                                <el-button 
+                                  v-if="model.partial_size"
+                                  size="small" 
+                                  type="success" 
+                                  :disabled="!!downloadingModel"
+                                  @click="downloadWhisperModel(model.name)"
+                                >
+                                  继续下载
+                                </el-button>
+                                <el-button 
+                                  v-else
+                                  size="small" 
+                                  type="primary" 
+                                  :disabled="!!downloadingModel"
+                                  @click="downloadWhisperModel(model.name)"
+                                >
+                                  下载
+                                </el-button>
+                              </template>
+                              <el-button 
+                                v-else 
+                                size="small" 
+                                type="danger" 
+                                plain 
+                                :disabled="!!downloadingModel || (configStore.transcriptionEngine === 'whisper' && configStore.whisperModel === model.name)"
+                                @click="deleteWhisperModel(model.name)"
+                              >
+                                卸载
+                              </el-button>
+                            </template>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </template>
                 </div>
               </div>
               
@@ -2713,6 +2939,12 @@ const shortcutCategories = computed(() => {
 
 .model-card-actions {
   margin-top: auto;
+}
+
+.model-status-hint {
+  font-size: 11px;
+  color: #9ca3af;
+  font-style: italic;
 }
 
 .download-progress-inline {

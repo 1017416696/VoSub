@@ -1,6 +1,6 @@
 mod srt_parser;
 mod waveform_generator;
-mod whisper_transcriber;
+mod whisper_python_transcriber;
 mod sensevoice_transcriber;
 mod firered_corrector;
 
@@ -8,8 +8,13 @@ use srt_parser::{
     read_srt_file, write_srt_file, SRTFile, SubtitleEntry,
     export_to_txt, export_to_vtt, export_to_markdown, export_to_fcpxml,
 };
-use whisper_transcriber::{
-    get_available_models, download_model, delete_model, transcribe_audio, cancel_transcription, cancel_download, WhisperModelInfo,
+use whisper_python_transcriber::{
+    check_whisper_env, install_whisper_env, transcribe_with_whisper,
+    uninstall_whisper_env, uninstall_whisper_env_by_type, switch_whisper_env,
+    cancel_whisper_transcription, cancel_whisper_model_download,
+    get_whisper_models, delete_whisper_model, open_whisper_model_dir,
+    download_whisper_model,
+    WhisperEnvStatus, WhisperModelInfo,
 };
 use sensevoice_transcriber::{
     check_sensevoice_env, install_sensevoice_env, transcribe_with_sensevoice, 
@@ -150,26 +155,24 @@ fn show_log_in_folder(app_handle: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+// ============ Whisper 相关命令 ============
+
+/// 检查 Whisper 环境状态
+#[tauri::command]
+fn check_whisper_env_status() -> WhisperEnvStatus {
+    check_whisper_env()
+}
+
+/// 安装 Whisper 环境
+#[tauri::command]
+async fn install_whisper(window: tauri::Window, use_gpu: Option<bool>) -> Result<String, String> {
+    install_whisper_env(window, use_gpu.unwrap_or(false)).await
+}
+
 /// 获取可用的 Whisper 模型列表
 #[tauri::command]
-fn get_whisper_models() -> Result<Vec<WhisperModelInfo>, String> {
-    get_available_models()
-}
-
-/// 下载 Whisper 模型
-/// 下载 Whisper 模型
-#[tauri::command]
-async fn download_whisper_model(
-    window: tauri::Window,
-    model_size: String,
-) -> Result<String, String> {
-    download_model(&model_size, window).await
-}
-
-/// 取消下载 Whisper 模型
-#[tauri::command]
-fn cancel_whisper_download() {
-    cancel_download();
+fn get_whisper_models_cmd() -> Vec<WhisperModelInfo> {
+    get_whisper_models()
 }
 
 /// 转录音频文件为字幕
@@ -180,19 +183,55 @@ async fn transcribe_audio_to_subtitles(
     model_size: String,
     language: String,
 ) -> Result<Vec<SubtitleEntry>, String> {
-    transcribe_audio(audio_path, model_size, language, window).await
+    transcribe_with_whisper(audio_path, model_size, language, window).await
+}
+
+/// 下载 Whisper 模型
+#[tauri::command]
+async fn download_whisper_model_cmd(window: tauri::Window, model_name: String) -> Result<String, String> {
+    download_whisper_model(&model_name, window).await
 }
 
 /// 删除 Whisper 模型
 #[tauri::command]
-fn delete_whisper_model(model_size: String) -> Result<String, String> {
-    delete_model(&model_size)
+fn delete_whisper_model_cmd(model_size: String) -> Result<String, String> {
+    delete_whisper_model(&model_size)
 }
 
 /// 取消转录任务
 #[tauri::command]
-fn cancel_transcription_task() {
-    cancel_transcription();
+fn cancel_whisper_task() {
+    cancel_whisper_transcription();
+}
+
+/// 取消 Whisper 模型下载
+#[tauri::command]
+fn cancel_whisper_model_download_cmd() {
+    cancel_whisper_model_download();
+}
+
+/// 卸载 Whisper 环境
+#[tauri::command]
+fn uninstall_whisper() -> Result<String, String> {
+    uninstall_whisper_env()
+}
+
+/// 卸载指定类型的 Whisper 环境
+#[tauri::command]
+fn uninstall_whisper_by_type(use_gpu: bool) -> Result<String, String> {
+    uninstall_whisper_env_by_type(use_gpu)
+}
+
+/// 切换 Whisper 环境
+#[tauri::command]
+fn switch_whisper(use_gpu: bool) -> Result<String, String> {
+    switch_whisper_env(use_gpu)
+}
+
+/// 打开 Whisper 模型目录
+#[tauri::command]
+fn open_whisper_model_dir_cmd() -> Result<(), String> {
+    open_whisper_model_dir()
 }
 
 // ============ SenseVoice 相关命令 ============
@@ -370,38 +409,6 @@ async fn correct_single_subtitle(
     preserve_case: Option<bool>,
 ) -> Result<SingleCorrectionResult, String> {
     correct_single_entry(audio_path, start_ms, end_ms, original_text, language, preserve_case.unwrap_or(true)).await
-}
-
-/// 打开模型目录
-#[tauri::command]
-fn open_whisper_model_dir() -> Result<(), String> {
-    let model_dir = whisper_transcriber::get_model_dir()?;
-    
-    #[cfg(target_os = "macos")]
-    {
-        std::process::Command::new("open")
-            .arg(&model_dir)
-            .spawn()
-            .map_err(|e| e.to_string())?;
-    }
-
-    #[cfg(target_os = "windows")]
-    {
-        std::process::Command::new("explorer")
-            .arg(&model_dir)
-            .spawn()
-            .map_err(|e| e.to_string())?;
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        std::process::Command::new("xdg-open")
-            .arg(&model_dir)
-            .spawn()
-            .map_err(|e| e.to_string())?;
-    }
-
-    Ok(())
 }
 
 // ============ 导出功能 ============
@@ -1017,13 +1024,19 @@ pub fn run() {
             update_recent_files_menu,
             get_log_path,
             show_log_in_folder,
-            get_whisper_models,
-            download_whisper_model,
-            cancel_whisper_download,
-            delete_whisper_model,
-            open_whisper_model_dir,
+            // Whisper 相关
+            check_whisper_env_status,
+            install_whisper,
+            get_whisper_models_cmd,
+            download_whisper_model_cmd,
+            delete_whisper_model_cmd,
+            open_whisper_model_dir_cmd,
             transcribe_audio_to_subtitles,
-            cancel_transcription_task,
+            cancel_whisper_task,
+            cancel_whisper_model_download_cmd,
+            uninstall_whisper,
+            uninstall_whisper_by_type,
+            switch_whisper,
             // SenseVoice 相关
             check_sensevoice_env_status,
             install_sensevoice,

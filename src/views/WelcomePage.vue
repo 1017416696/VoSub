@@ -153,7 +153,7 @@ onMounted(async () => {
     transcriptionMessage.value = event.payload.current_text
   })
 
-  try { availableModels.value = await invoke<WhisperModelInfo[]>('get_whisper_models') } catch (e) { console.error(e) }
+  try { availableModels.value = await invoke<WhisperModelInfo[]>('get_whisper_models_cmd') } catch (e) { console.error(e) }
   // 检查 SenseVoice 环境
   try { sensevoiceEnvStatus.value = await invoke<SenseVoiceEnvStatus>('check_sensevoice_env_status') } catch (e) { console.error(e) }
 })
@@ -282,40 +282,39 @@ const startTranscription = async () => {
 
 // Whisper 转录
 const startWhisperTranscription = async (audioPath: string) => {
-  const modelName = configStore.whisperModel
-  const model = availableModels.value.find(m => m.name === modelName)
+  // 检查 Whisper 环境是否就绪
+  interface WhisperEnvStatus {
+    uv_installed: boolean
+    ready: boolean
+  }
   
-  // 如果模型未下载，自动下载
-  if (!model || !model.downloaded) {
-    const targetModel = model || availableModels.value.find(m => m.name === 'base')!
+  let whisperEnvStatus: WhisperEnvStatus
+  try {
+    whisperEnvStatus = await invoke<WhisperEnvStatus>('check_whisper_env_status')
+  } catch (e) {
+    await ElMessageBox.alert('无法检查 Whisper 环境状态', '错误', { confirmButtonText: '确定', type: 'error' })
+    return
+  }
+  
+  if (!whisperEnvStatus.ready) {
+    // 需要安装环境
     const confirm = await ElMessageBox.confirm(
-      `模型 ${targetModel.name} (${targetModel.size}) 尚未下载，是否现在下载？`,
-      '需要下载模型',
-      { confirmButtonText: '下载', cancelButtonText: '取消', type: 'info' }
+      'Whisper 环境尚未安装，需要下载约 200MB-2.5GB 的依赖（取决于 CPU/GPU 版本）。请先在设置中安装环境。',
+      '需要安装环境',
+      { confirmButtonText: '打开设置', cancelButtonText: '取消', type: 'info' }
     ).catch(() => false)
-    if (!confirm) return
-    
-    isTranscribing.value = true
-    transcriptionProgress.value = 0
-    transcriptionMessage.value = '正在下载模型...'
-    showTranscriptionDialog.value = true
-    try {
-      await invoke('download_whisper_model', { modelSize: targetModel.name })
-      availableModels.value = await invoke<WhisperModelInfo[]>('get_whisper_models')
-      configStore.whisperModel = targetModel.name
-      configStore.saveWhisperSettings()
-    } catch (error) {
-      isTranscribing.value = false
-      showTranscriptionDialog.value = false
-      await ElMessageBox.alert(`下载模型失败：${error instanceof Error ? error.message : '未知错误'}`, '下载失败', { confirmButtonText: '确定', type: 'error' })
-      return
+    if (confirm) {
+      // 触发打开设置对话框
+      const event = new CustomEvent('open-settings', { detail: { tab: 'whisper' } })
+      window.dispatchEvent(event)
     }
+    return
   }
 
   isTranscribing.value = true
   isCancelled.value = false
   transcriptionProgress.value = 0
-  transcriptionMessage.value = '正在转录音频...'
+  transcriptionMessage.value = '正在转录音频（首次使用模型时会自动下载）...'
   showTranscriptionDialog.value = true
   
   const entries = await invoke<SubtitleEntry[]>('transcribe_audio_to_subtitles', {
@@ -489,7 +488,7 @@ const cancelTranscription = async () => {
     if (configStore.transcriptionEngine === 'sensevoice') {
       await invoke('cancel_sensevoice_task')
     } else {
-      await invoke('cancel_transcription_task')
+      await invoke('cancel_whisper_task')
     }
   } catch (e) {
     console.error('取消转录失败:', e)
