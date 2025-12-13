@@ -1562,18 +1562,33 @@ onBeforeUnmount(() => {
     <div v-if="isBatchCorrecting" class="correction-progress-overlay">
       <div class="correction-progress-dialog">
         <div class="progress-header">
-          <svg class="progress-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-          </svg>
-          <span>批量 AI 字幕校正</span>
+          <div class="progress-icon-wrapper">
+            <svg class="progress-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+            </svg>
+          </div>
+          <div class="progress-title-section">
+            <span class="progress-title">批量 AI 字幕校正</span>
+            <span class="progress-subtitle">正在使用 AI 模型校正字幕内容</span>
+          </div>
         </div>
         <div class="progress-content">
-          <div class="progress-bar-container">
-            <div class="progress-bar" :style="{ width: correctionProgress.progress + '%' }"></div>
+          <div class="progress-stats">
+            <span class="progress-percent">{{ Math.round(correctionProgress.progress) }}%</span>
           </div>
-          <div class="progress-text">{{ correctionProgress.currentText }}</div>
-          <div class="progress-percent">{{ Math.round(correctionProgress.progress) }}%</div>
+          <div class="progress-bar-container">
+            <div class="progress-bar" :style="{ width: correctionProgress.progress + '%' }">
+              <div class="progress-bar-shine"></div>
+            </div>
+          </div>
+          <div class="progress-status">
+            <svg class="status-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/>
+              <polyline points="12,6 12,12 16,14"/>
+            </svg>
+            <span class="progress-text">{{ correctionProgress.currentText }}</span>
+          </div>
         </div>
       </div>
     </div>
@@ -1632,66 +1647,149 @@ onBeforeUnmount(() => {
 
 .correction-progress-dialog {
   background: #fff;
-  border-radius: 16px;
-  padding: 24px 32px;
-  min-width: 400px;
-  max-width: 500px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  border-radius: 20px;
+  padding: 28px 32px;
+  min-width: 420px;
+  max-width: 480px;
+  box-shadow: 0 25px 80px rgba(0, 0, 0, 0.25), 0 10px 30px rgba(59, 130, 246, 0.1);
+  animation: dialogSlideIn 0.3s ease-out;
+}
+
+@keyframes dialogSlideIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95) translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
 }
 
 .progress-header {
   display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  margin-bottom: 24px;
+}
+
+.progress-icon-wrapper {
+  width: 44px;
+  height: 44px;
+  background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+  border-radius: 12px;
+  display: flex;
   align-items: center;
-  gap: 12px;
-  margin-bottom: 20px;
-  font-size: 16px;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.progress-title-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 2px;
+}
+
+.progress-title {
+  font-size: 17px;
   font-weight: 600;
   color: #1e293b;
+  letter-spacing: -0.01em;
+}
+
+.progress-subtitle {
+  font-size: 13px;
+  color: #94a3b8;
+  font-weight: 400;
 }
 
 .progress-icon {
   color: #3b82f6;
-  animation: pulse 2s ease-in-out infinite;
+  animation: iconPulse 2s ease-in-out infinite;
 }
 
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
+@keyframes iconPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.7; transform: scale(0.95); }
 }
 
 .progress-content {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 16px;
+}
+
+.progress-stats {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.progress-percent {
+  font-size: 14px;
+  font-weight: 600;
+  color: #3b82f6;
+  background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+  padding: 4px 12px;
+  border-radius: 20px;
 }
 
 .progress-bar-container {
-  height: 8px;
-  background: #e2e8f0;
-  border-radius: 4px;
+  height: 10px;
+  background: #f1f5f9;
+  border-radius: 10px;
   overflow: hidden;
+  position: relative;
 }
 
 .progress-bar {
   height: 100%;
-  background: linear-gradient(90deg, #3b82f6 0%, #2563eb 100%);
-  border-radius: 4px;
-  transition: width 0.3s ease;
+  background: linear-gradient(90deg, #3b82f6 0%, #2563eb 50%, #3b82f6 100%);
+  background-size: 200% 100%;
+  border-radius: 10px;
+  transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  overflow: hidden;
+}
+
+.progress-bar-shine {
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.4), transparent);
+  animation: shine 2s ease-in-out infinite;
+}
+
+@keyframes shine {
+  0% { left: -100%; }
+  50%, 100% { left: 100%; }
+}
+
+.progress-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  background: #f8fafc;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+}
+
+.status-icon {
+  color: #94a3b8;
+  flex-shrink: 0;
+  animation: iconPulse 2s ease-in-out infinite;
 }
 
 .progress-text {
   font-size: 13px;
   color: #64748b;
   line-height: 1.5;
-  min-height: 40px;
   word-break: break-all;
-}
-
-.progress-percent {
-  font-size: 24px;
-  font-weight: 700;
-  color: #3b82f6;
-  text-align: center;
+  flex: 1;
 }
 
 /* 全局底部状态栏 */
