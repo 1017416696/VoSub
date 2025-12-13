@@ -55,6 +55,7 @@ const fireredStatus = ref<FireRedEnvStatus>({
 })
 const isCorrecting = ref(false) // 单条校正中
 const isBatchCorrecting = ref(false) // 批量校正中
+const isCorrectionCancelling = ref(false) // 正在取消校正
 const singleCorrectionResult = ref<{ original: string; corrected: string; has_diff: boolean } | null>(null)
 const showOnlyNeedsCorrection = ref(false) // 只显示需要校正的字幕
 const correctionProgress = ref({ progress: 0, currentText: '', status: '' }) // 批量校正进度
@@ -972,11 +973,30 @@ const startCorrection = async () => {
     }
   } catch (error) {
     console.error('Correction error:', error)
-    ElMessage.error(`校正失败：${error instanceof Error ? error.message : String(error)}`)
+    // 如果是用户取消，不显示错误
+    if (!isCorrectionCancelling.value) {
+      ElMessage.error(`校正失败：${error instanceof Error ? error.message : String(error)}`)
+    }
   } finally {
     unlistenProgress()
     isBatchCorrecting.value = false
+    isCorrectionCancelling.value = false
     correctionProgress.value = { progress: 0, currentText: '', status: '' }
+  }
+}
+
+// 取消批量校正
+const cancelBatchCorrection = async () => {
+  if (!isBatchCorrecting.value || isCorrectionCancelling.value) return
+  
+  isCorrectionCancelling.value = true
+  correctionProgress.value.currentText = '正在取消...'
+  
+  try {
+    await invoke('cancel_firered_task')
+    ElMessage.info('已取消批量校正')
+  } catch (error) {
+    console.error('Cancel error:', error)
   }
 }
 
@@ -1558,40 +1578,33 @@ onBeforeUnmount(() => {
       :initial-variant="quickAddInitialVariant"
     />
 
-    <!-- 批量校正进度弹窗 -->
-    <div v-if="isBatchCorrecting" class="correction-progress-overlay">
-      <div class="correction-progress-dialog">
-        <div class="progress-header">
-          <div class="progress-icon-wrapper">
-            <svg class="progress-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+    <!-- 批量校正进度浮窗（右下角非阻塞式） -->
+    <Transition name="slide-up">
+      <div v-if="isBatchCorrecting" class="correction-progress-float">
+        <div class="float-header">
+          <div class="float-icon-wrapper">
+            <svg class="float-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
               <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
             </svg>
           </div>
-          <div class="progress-title-section">
-            <span class="progress-title">批量 AI 字幕校正</span>
-            <span class="progress-subtitle">正在使用 AI 模型校正字幕内容</span>
+          <div class="float-title-section">
+            <span class="float-title">批量 AI 字幕校正</span>
+            <span class="float-percent">{{ Math.round(correctionProgress.progress) }}%</span>
           </div>
-        </div>
-        <div class="progress-content">
-          <div class="progress-stats">
-            <span class="progress-percent">{{ Math.round(correctionProgress.progress) }}%</span>
-          </div>
-          <div class="progress-bar-container">
-            <div class="progress-bar" :style="{ width: correctionProgress.progress + '%' }">
-              <div class="progress-bar-shine"></div>
-            </div>
-          </div>
-          <div class="progress-status">
-            <svg class="status-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="12" cy="12" r="10"/>
-              <polyline points="12,6 12,12 16,14"/>
+          <button class="float-cancel-btn" @click="cancelBatchCorrection" title="取消校正">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="18" y1="6" x2="6" y2="18"/>
+              <line x1="6" y1="6" x2="18" y2="18"/>
             </svg>
-            <span class="progress-text">{{ correctionProgress.currentText }}</span>
-          </div>
+          </button>
         </div>
+        <div class="float-progress-bar">
+          <div class="float-progress-fill" :style="{ width: correctionProgress.progress + '%' }"></div>
+        </div>
+        <div class="float-status">{{ correctionProgress.currentText }}</div>
       </div>
-    </div>
+    </Transition>
   </div>
 </template>
 
@@ -1631,165 +1644,141 @@ onBeforeUnmount(() => {
   flex-direction: column;
 }
 
-/* 批量校正进度弹窗 */
-.correction-progress-overlay {
+/* 批量校正进度浮窗（右下角非阻塞式） */
+.correction-progress-float {
   position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 2000;
-}
-
-.correction-progress-dialog {
+  bottom: 48px;
+  right: 20px;
+  width: 320px;
   background: #fff;
-  border-radius: 20px;
-  padding: 28px 32px;
-  min-width: 420px;
-  max-width: 480px;
-  box-shadow: 0 25px 80px rgba(0, 0, 0, 0.25), 0 10px 30px rgba(59, 130, 246, 0.1);
-  animation: dialogSlideIn 0.3s ease-out;
-}
-
-@keyframes dialogSlideIn {
-  from {
-    opacity: 0;
-    transform: scale(0.95) translateY(-10px);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1) translateY(0);
-  }
-}
-
-.progress-header {
-  display: flex;
-  align-items: flex-start;
-  gap: 14px;
-  margin-bottom: 24px;
-}
-
-.progress-icon-wrapper {
-  width: 44px;
-  height: 44px;
-  background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
   border-radius: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.progress-title-section {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding-top: 2px;
-}
-
-.progress-title {
-  font-size: 17px;
-  font-weight: 600;
-  color: #1e293b;
-  letter-spacing: -0.01em;
-}
-
-.progress-subtitle {
-  font-size: 13px;
-  color: #94a3b8;
-  font-weight: 400;
-}
-
-.progress-icon {
-  color: #3b82f6;
-  animation: iconPulse 2s ease-in-out infinite;
-}
-
-@keyframes iconPulse {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.7; transform: scale(0.95); }
-}
-
-.progress-content {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.progress-stats {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-}
-
-.progress-percent {
-  font-size: 14px;
-  font-weight: 600;
-  color: #3b82f6;
-  background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
-  padding: 4px 12px;
-  border-radius: 20px;
-}
-
-.progress-bar-container {
-  height: 10px;
-  background: #f1f5f9;
-  border-radius: 10px;
-  overflow: hidden;
-  position: relative;
-}
-
-.progress-bar {
-  height: 100%;
-  background: linear-gradient(90deg, #3b82f6 0%, #2563eb 50%, #3b82f6 100%);
-  background-size: 200% 100%;
-  border-radius: 10px;
-  transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-  position: relative;
-  overflow: hidden;
-}
-
-.progress-bar-shine {
-  position: absolute;
-  top: 0;
-  left: -100%;
-  width: 100%;
-  height: 100%;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.4), transparent);
-  animation: shine 2s ease-in-out infinite;
-}
-
-@keyframes shine {
-  0% { left: -100%; }
-  50%, 100% { left: 100%; }
-}
-
-.progress-status {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 12px 14px;
-  background: #f8fafc;
-  border-radius: 10px;
+  padding: 14px 16px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12), 0 2px 8px rgba(59, 130, 246, 0.08);
+  z-index: 1000;
   border: 1px solid #e2e8f0;
 }
 
-.status-icon {
-  color: #94a3b8;
-  flex-shrink: 0;
-  animation: iconPulse 2s ease-in-out infinite;
+.float-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
 }
 
-.progress-text {
-  font-size: 13px;
-  color: #64748b;
-  line-height: 1.5;
-  word-break: break-all;
+.float-icon-wrapper {
+  width: 32px;
+  height: 32px;
+  background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.float-icon {
+  color: #3b82f6;
+  animation: floatIconPulse 2s ease-in-out infinite;
+}
+
+@keyframes floatIconPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+.float-title-section {
   flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.float-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.float-percent {
+  font-size: 13px;
+  font-weight: 600;
+  color: #3b82f6;
+}
+
+.float-cancel-btn {
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: #f1f5f9;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #64748b;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+
+.float-cancel-btn:hover {
+  background: #fee2e2;
+  color: #ef4444;
+}
+
+.float-progress-bar {
+  height: 6px;
+  background: #f1f5f9;
+  border-radius: 3px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+
+.float-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #3b82f6 0%, #2563eb 100%);
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.float-status {
+  font-size: 12px;
+  color: #64748b;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 浮窗动画 */
+.slide-up-enter-active {
+  animation: slideUpIn 0.3s ease-out;
+}
+
+.slide-up-leave-active {
+  animation: slideUpOut 0.2s ease-in;
+}
+
+@keyframes slideUpIn {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideUpOut {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(20px);
+  }
 }
 
 /* 全局底部状态栏 */
