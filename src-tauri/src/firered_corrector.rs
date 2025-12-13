@@ -571,6 +571,55 @@ pub fn delete_firered_model(model_name: &str) -> Result<String, String> {
     Ok(format!("模型 {} 已删除", model_name))
 }
 
+/// 打开 FireRedASR 模型目录
+pub fn open_firered_model_dir() -> Result<(), String> {
+    // 尝试获取实际的模型路径（如果已下载）
+    let model_dir = if is_firered_model_downloaded("FireRedASR-AED-L") {
+        // 如果模型已下载，直接打开模型目录
+        match get_firered_model_path("FireRedASR-AED-L") {
+            Ok(path) => path,
+            Err(_) => get_firered_model_dir()?,
+        }
+    } else {
+        // 如果模型未下载，打开 modelscope hub 目录
+        let home_dir = dirs::home_dir()
+            .ok_or_else(|| "Failed to get home directory".to_string())?;
+        home_dir.join(".cache").join("modelscope").join("hub")
+    };
+    
+    // 如果目录不存在，创建它
+    if !model_dir.exists() {
+        std::fs::create_dir_all(&model_dir)
+            .map_err(|e| format!("创建目录失败: {}", e))?;
+    }
+    
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(&model_dir)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg(&model_dir)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(&model_dir)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    
+    Ok(())
+}
+
 /// 获取 Python 脚本目录
 fn get_scripts_dir() -> Result<PathBuf, String> {
     let home_dir = dirs::home_dir()

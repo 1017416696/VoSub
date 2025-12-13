@@ -20,14 +20,15 @@ use sensevoice_transcriber::{
     check_sensevoice_env, install_sensevoice_env, transcribe_with_sensevoice, 
     uninstall_sensevoice_env, uninstall_sensevoice_env_by_type, switch_sensevoice_env,
     cancel_sensevoice_transcription, cancel_sensevoice_model_download, SenseVoiceEnvStatus,
-    get_sensevoice_models, download_sensevoice_model, delete_sensevoice_model, SenseVoiceModelInfo,
+    get_sensevoice_models, download_sensevoice_model, delete_sensevoice_model, open_sensevoice_model_dir,
+    SenseVoiceModelInfo,
 };
 use firered_corrector::{
     check_firered_env, install_firered_env, correct_with_firered, correct_single_entry,
     uninstall_firered_env, uninstall_firered_env_by_type, switch_firered_env,
     cancel_firered_correction, cancel_firered_model_download, preload_firered_service, is_service_running,
     preload_audio_for_correction,
-    get_firered_models, download_firered_model, delete_firered_model,
+    get_firered_models, download_firered_model, delete_firered_model, open_firered_model_dir,
     FireRedEnvStatus, CorrectionEntry, SingleCorrectionResult, FireRedModelInfo,
 };
 use waveform_generator::{generate_waveform_with_progress, ProgressCallback};
@@ -306,6 +307,12 @@ fn delete_sensevoice_model_cmd(model_name: String) -> Result<String, String> {
     delete_sensevoice_model(&model_name)
 }
 
+/// 打开 SenseVoice 模型目录
+#[tauri::command]
+fn open_sensevoice_model_dir_cmd() -> Result<(), String> {
+    open_sensevoice_model_dir()
+}
+
 // ============ FireRedASR 校正相关命令 ============
 
 /// 检查 FireRedASR 环境状态
@@ -396,6 +403,12 @@ async fn download_firered_model_cmd(window: tauri::Window, model_name: String) -
 #[tauri::command]
 fn delete_firered_model_cmd(model_name: String) -> Result<String, String> {
     delete_firered_model(&model_name)
+}
+
+/// 打开 FireRedASR 模型目录
+#[tauri::command]
+fn open_firered_model_dir_cmd() -> Result<(), String> {
+    open_firered_model_dir()
 }
 
 /// 校正单条字幕
@@ -1049,6 +1062,7 @@ pub fn run() {
             get_sensevoice_model_list,
             download_sensevoice_model_cmd,
             delete_sensevoice_model_cmd,
+            open_sensevoice_model_dir_cmd,
             // FireRedASR 校正相关
             check_firered_env_status,
             install_firered,
@@ -1065,6 +1079,7 @@ pub fn run() {
             get_firered_models_cmd,
             download_firered_model_cmd,
             delete_firered_model_cmd,
+            open_firered_model_dir_cmd,
             // 导出功能
             export_txt,
             export_vtt,

@@ -451,6 +451,43 @@ pub fn delete_sensevoice_model(model_name: &str) -> Result<String, String> {
     Ok(format!("模型 {} 已删除", model_name))
 }
 
+/// 打开 SenseVoice 模型目录
+pub fn open_sensevoice_model_dir() -> Result<(), String> {
+    let model_dir = get_sensevoice_model_dir()?;
+    
+    // 如果目录不存在，创建它
+    if !model_dir.exists() {
+        std::fs::create_dir_all(&model_dir)
+            .map_err(|e| format!("创建目录失败: {}", e))?;
+    }
+    
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(&model_dir)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg(&model_dir)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(&model_dir)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    
+    Ok(())
+}
+
 /// Python 脚本输出的转录结果
 #[derive(Debug, Deserialize)]
 struct TranscriptionResult {

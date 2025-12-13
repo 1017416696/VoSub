@@ -866,11 +866,27 @@ const deleteWhisperModel = async (modelName: string) => {
   }
 }
 
-const openModelDir = async () => {
+const openWhisperModelDir = async () => {
   try {
     await invoke('open_whisper_model_dir_cmd')
   } catch (e) {
-    ElMessage.error('无法打开模型目录')
+    ElMessage.error('无法打开 Whisper 模型目录')
+  }
+}
+
+const openSensevoiceModelDir = async () => {
+  try {
+    await invoke('open_sensevoice_model_dir_cmd')
+  } catch (e) {
+    ElMessage.error('无法打开 SenseVoice 模型目录')
+  }
+}
+
+const openFireredModelDir = async () => {
+  try {
+    await invoke('open_firered_model_dir_cmd')
+  } catch (e) {
+    ElMessage.error('无法打开 FireRedASR 模型目录')
   }
 }
 
@@ -1238,10 +1254,6 @@ const shortcutCategories = computed(() => {
             <div v-if="activeMenu === 'whisper'" class="content-section">
               <div class="section-header">
                 <h2 class="section-title">语音模型</h2>
-                <el-button size="small" @click="openModelDir">
-                  <el-icon><FolderOpened /></el-icon>
-                  <span>打开模型目录</span>
-                </el-button>
               </div>
               
               <!-- Whisper 部分 -->
@@ -1256,6 +1268,10 @@ const shortcutCategories = computed(() => {
                     <h3 class="engine-title">Whisper (faster-whisper)</h3>
                     <span class="engine-badge">OpenAI</span>
                   </div>
+                  <el-button v-if="whisperModels.some(m => m.downloaded)" class="engine-folder-btn" size="small" text @click="openWhisperModelDir">
+                    <el-icon><FolderOpened /></el-icon>
+                    <span>打开模型目录</span>
+                  </el-button>
                 </div>
                 <p class="engine-desc">OpenAI 开发的语音识别模型，使用 faster-whisper 加速推理，支持多语言。</p>
                 
@@ -1445,6 +1461,10 @@ const shortcutCategories = computed(() => {
                     <h3 class="engine-title">SenseVoice</h3>
                     <span class="engine-badge alibaba">阿里达摩院</span>
                   </div>
+                  <el-button v-if="sensevoiceModels.some(m => m.downloaded)" class="engine-folder-btn" size="small" text @click="openSensevoiceModelDir">
+                    <el-icon><FolderOpened /></el-icon>
+                    <span>打开模型目录</span>
+                  </el-button>
                 </div>
                 <p class="engine-desc">阿里达摩院开发的语音识别模型，中文识别效果优秀，支持情感识别。</p>
                 
@@ -1635,7 +1655,10 @@ const shortcutCategories = computed(() => {
                     <h3 class="engine-title">FireRedASR</h3>
                     <span class="engine-badge xiaohongshu">小红书</span>
                   </div>
-
+                  <el-button v-if="fireredModels.some(m => m.downloaded)" class="engine-folder-btn" size="small" text @click="openFireredModelDir">
+                    <el-icon><FolderOpened /></el-icon>
+                    <span>打开模型目录</span>
+                  </el-button>
                 </div>
                 <p class="engine-desc">小红书开源的语音识别模型，用于字幕二次校正，可提升识别准确率。</p>
                 
@@ -2724,6 +2747,16 @@ const shortcutCategories = computed(() => {
   align-items: center;
   gap: 10px;
   flex: 1;
+}
+
+.engine-folder-btn {
+  margin-left: auto;
+  color: #666;
+  font-size: 12px;
+}
+
+.engine-folder-btn:hover {
+  color: #409eff;
 }
 
 .engine-title {
