@@ -18,6 +18,7 @@ import SettingsDialog from '@/components/SettingsDialog.vue'
 import CorrectionCompareDialog from '@/components/CorrectionCompareDialog.vue'
 import DictionaryPreviewDialog from '@/components/DictionaryPreviewDialog.vue'
 import QuickAddDictionaryDialog from '@/components/QuickAddDictionaryDialog.vue'
+import SplitSubtitleDialog from '@/components/SplitSubtitleDialog.vue'
 import TitleBar from '@/components/TitleBar.vue'
 import { EditorSidebar, AudioEmptyState, TimelineControls, SubtitleListPanel, SubtitleEditPanel } from '@/components/editor'
 import { ElMessage, ElMessageBox, ElLoading } from 'element-plus'
@@ -563,6 +564,21 @@ const dictionaryItems = ref<DictionaryReplacement[]>([])
 const showQuickAddDialog = ref(false)
 const quickAddInitialVariant = ref('')
 
+// 分割对话框状态
+const showSplitDialog = ref(false)
+const splitDialogData = ref<{
+  subtitleId: number
+  originalText: string
+  startTimeMs: number
+  endTimeMs: number
+  initialSplitTimeMs?: number
+}>({
+  subtitleId: 0,
+  originalText: '',
+  startTimeMs: 0,
+  endTimeMs: 0
+})
+
 const handleApplyDictionary = async () => {
   if (subtitleStore.entries.length === 0) {
     ElMessage.warning('没有字幕内容')
@@ -718,14 +734,37 @@ const handleSubtitleDoubleClick = async (id: number) => {
 
 const handleSplitSubtitle = async (id: number, splitTimeMs: number) => {
   if (audioStore.playerState.isPlaying) audioStore.pause()
-  const newId = subtitleStore.splitEntry(id, splitTimeMs)
+  
+  // 获取要分割的字幕信息
+  const entry = subtitleStore.entries.find(e => e.id === id)
+  if (!entry) return
+  
+  // 显示分割对话框
+  splitDialogData.value = {
+    subtitleId: id,
+    originalText: entry.text,
+    startTimeMs: timeStampToMs(entry.startTime),
+    endTimeMs: timeStampToMs(entry.endTime),
+    initialSplitTimeMs: splitTimeMs
+  }
+  showSplitDialog.value = true
+  isScissorMode.value = false
+}
+
+// 处理分割对话框确认
+const handleSplitConfirm = async (segments: Array<{ id: number; startTimeMs: number; endTimeMs: number; text: string }>) => {
+  const newId = subtitleStore.splitEntryMultiple(splitDialogData.value.subtitleId, segments)
   if (newId) {
     selectedEntryId.value = newId
     if (subtitleStore.currentFilePath) {
       try { await subtitleStore.saveToFile() } catch {}
     }
   }
-  isScissorMode.value = false
+  showSplitDialog.value = false
+}
+
+const handleSplitCancel = () => {
+  showSplitDialog.value = false
 }
 
 // 批量删除选中的字幕（时间轴多选删除）
@@ -1625,6 +1664,20 @@ onBeforeUnmount(() => {
     <QuickAddDictionaryDialog
       v-model:visible="showQuickAddDialog"
       :initial-variant="quickAddInitialVariant"
+    />
+
+    <!-- 分割字幕对话框 -->
+    <SplitSubtitleDialog
+      v-model:visible="showSplitDialog"
+      :subtitle-id="splitDialogData.subtitleId"
+      :original-text="splitDialogData.originalText"
+      :start-time-ms="splitDialogData.startTimeMs"
+      :end-time-ms="splitDialogData.endTimeMs"
+      :initial-split-time-ms="splitDialogData.initialSplitTimeMs"
+      :waveform-data="audioStore.audioFile?.waveform"
+      :audio-duration="audioStore.playerState.duration"
+      @confirm="handleSplitConfirm"
+      @cancel="handleSplitCancel"
     />
 
     <!-- 批量校正进度浮窗（右下角非阻塞式） -->

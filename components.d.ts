@@ -21,6 +21,7 @@ declare module 'vue' {
     RouterView: typeof import('vue-router')['RouterView']
     SearchReplaceBar: typeof import('./src/components/editor/SearchReplaceBar.vue')['default']
     SettingsDialog: typeof import('./src/components/SettingsDialog.vue')['default']
+    SplitSubtitleDialog: typeof import('./src/components/SplitSubtitleDialog.vue')['default']
     SubtitleEditPanel: typeof import('./src/components/editor/SubtitleEditPanel.vue')['default']
     SubtitleListPanel: typeof import('./src/components/editor/SubtitleListPanel.vue')['default']
     TimelineControls: typeof import('./src/components/editor/TimelineControls.vue')['default']

@@ -13,6 +13,14 @@ import { useConfigStore } from '@/stores/config'
 import { useTabManagerStore } from '@/stores/tabManager'
 import logger from '@/utils/logger'
 
+// 分割片段类型（用于多段分割）
+export interface SplitSegment {
+  id: number
+  startTimeMs: number
+  endTimeMs: number
+  text: string
+}
+
 export const useSubtitleStore = defineStore('subtitle', () => {
   const tabManager = useTabManagerStore()
 
@@ -534,6 +542,100 @@ export const useSubtitleStore = defineStore('subtitle', () => {
     return newId
   }
 
+  // 多段分割字幕（智能分割）
+  const splitEntryMultiple = (entryId: number, segments: SplitSegment[]) => {
+    if (segments.length < 2) return null
+
+    const currentEntries = entries.value
+    const entry = currentEntries.find((e) => e.id === entryId)
+    if (!entry) return null
+
+    const index = currentEntries.findIndex((e) => e.id === entryId)
+    
+    const msToTimeStamp = (ms: number): TimeStamp => {
+      const totalSeconds = Math.floor(ms / 1000)
+      return {
+        hours: Math.floor(totalSeconds / 3600),
+        minutes: Math.floor((totalSeconds % 3600) / 60),
+        seconds: totalSeconds % 60,
+        milliseconds: ms % 1000,
+      }
+    }
+
+    // 保存原始条目用于历史记录
+    const originalEntry = {
+      ...entry,
+      startTime: { ...entry.startTime },
+      endTime: { ...entry.endTime },
+    }
+
+    // 更新第一个条目
+    entry.startTime = msToTimeStamp(segments[0]!.startTimeMs)
+    entry.endTime = msToTimeStamp(segments[0]!.endTimeMs)
+    entry.text = segments[0]!.text
+
+    // 创建新的条目
+    const newEntries: SubtitleEntry[] = []
+    for (let i = 1; i < segments.length; i++) {
+      const seg = segments[i]!
+      newEntries.push({
+        id: entryId + i, // 临时 ID，后面会重新编号
+        startTime: msToTimeStamp(seg.startTimeMs),
+        endTime: msToTimeStamp(seg.endTimeMs),
+        text: seg.text,
+      })
+    }
+
+    // 插入新条目
+    currentEntries.splice(index + 1, 0, ...newEntries)
+
+    // 重新编号
+    currentEntries.forEach((e, i) => {
+      e.id = i + 1
+    })
+
+    // 收集所有分割后的条目数据（用于撤销时的重做）
+    const splitSegmentsData: Partial<SubtitleEntry>[] = []
+    for (let i = 0; i < segments.length; i++) {
+      const segEntry = currentEntries[index + i]
+      if (segEntry) {
+        splitSegmentsData.push({
+          id: segEntry.id,
+          startTime: { ...segEntry.startTime },
+          endTime: { ...segEntry.endTime },
+          text: segEntry.text,
+        })
+      }
+    }
+
+    // 记录历史（使用多段分割类型）
+    addHistory({
+      type: HistoryActionType.SPLIT_MULTIPLE,
+      timestamp: Date.now(),
+      entryId: index + 1,
+      before: originalEntry,
+      after: {
+        ...entry,
+        startTime: { ...entry.startTime },
+        endTime: { ...entry.endTime },
+      },
+      splitSegments: splitSegmentsData,
+      description: `分割字幕 #${entryId} 为 ${segments.length} 段`,
+    })
+
+    detectTimeConflicts()
+    assignSubtitleToTracks()
+
+    logger.info('多段分割字幕', { 
+      entryId, 
+      segmentCount: segments.length,
+      newIds: Array.from({ length: segments.length }, (_, i) => index + 1 + i)
+    })
+
+    // 返回第一个新条目的 ID（原条目之后的第一个）
+    return index + 2
+  }
+
   // 合并字幕
   const mergeEntries = (entryIds: number[]) => {
     if (entryIds.length < 2) return null
@@ -927,6 +1029,36 @@ export const useSubtitleStore = defineStore('subtitle', () => {
         break
       }
 
+      case HistoryActionType.SPLIT_MULTIPLE: {
+        // 撤销多段分割：删除所有分割产生的新字幕，恢复原始字幕
+        if (action.splitSegments && action.splitSegments.length > 1 && action.before) {
+          const firstEntryIndex = currentEntries.findIndex((e) => e.id === action.entryId)
+          if (firstEntryIndex !== -1) {
+            // 删除所有分割产生的字幕（包括修改后的第一条）
+            currentEntries.splice(firstEntryIndex, action.splitSegments.length)
+            
+            // 恢复原始字幕
+            const restoredEntry: SubtitleEntry = {
+              id: action.entryId,
+              startTime: { ...action.before.startTime! },
+              endTime: { ...action.before.endTime! },
+              text: action.before.text || '',
+            }
+            
+            currentEntries.splice(firstEntryIndex, 0, restoredEntry)
+            
+            // 重新编号
+            currentEntries.forEach((e, i) => {
+              e.id = i + 1
+            })
+          }
+        }
+
+        detectTimeConflicts()
+        assignSubtitleToTracks()
+        break
+      }
+
       case HistoryActionType.MERGE: {
         // 撤销合并：删除合并后的字幕，恢复所有原始字幕
         if (action.mergedEntries && action.mergedEntries.length > 0) {
@@ -1012,6 +1144,36 @@ export const useSubtitleStore = defineStore('subtitle', () => {
               text: action.newEntry.text || '',
             }
             currentEntries.splice(insertIndex + 1, 0, newEntry)
+            currentEntries.forEach((e, i) => {
+              e.id = i + 1
+            })
+          }
+        }
+
+        detectTimeConflicts()
+        assignSubtitleToTracks()
+        break
+      }
+
+      case HistoryActionType.SPLIT_MULTIPLE: {
+        // 重做多段分割：删除原始字幕，创建所有分割后的字幕
+        if (action.splitSegments && action.splitSegments.length > 1) {
+          const firstEntryIndex = currentEntries.findIndex((e) => e.id === action.entryId)
+          if (firstEntryIndex !== -1) {
+            // 删除原始字幕
+            currentEntries.splice(firstEntryIndex, 1)
+            
+            // 插入所有分割后的字幕
+            const splitEntries: SubtitleEntry[] = action.splitSegments.map((seg) => ({
+              id: seg.id!,
+              startTime: { ...seg.startTime! },
+              endTime: { ...seg.endTime! },
+              text: seg.text || '',
+            }))
+            
+            currentEntries.splice(firstEntryIndex, 0, ...splitEntries)
+            
+            // 重新编号
             currentEntries.forEach((e, i) => {
               e.id = i + 1
             })
@@ -1277,6 +1439,7 @@ export const useSubtitleStore = defineStore('subtitle', () => {
     deleteEntry,
     deleteEntries,
     splitEntry,
+    splitEntryMultiple,
     mergeEntries,
     addEntry,
     removePunctuation,
