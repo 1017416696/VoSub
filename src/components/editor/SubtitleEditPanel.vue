@@ -23,6 +23,7 @@ const emit = defineEmits<{
   (e: 'remove-punctuation'): void
   (e: 'to-uppercase'): void
   (e: 'to-lowercase'): void
+  (e: 'to-capitalize'): void
   (e: 'text-focus'): void
   (e: 'text-blur'): void
   (e: 'text-input'): void
@@ -491,6 +492,15 @@ defineExpose({
               <path d="M17 14H21"/>
             </svg>
             <span>转小写</span>
+          </button>
+          <button class="quick-action-btn" @click="emit('to-capitalize')" title="首字母大写">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M3 18L9 6L15 18"/>
+              <path d="M5 14H13"/>
+              <circle cx="19" cy="14" r="3"/>
+              <path d="M22 18V11"/>
+            </svg>
+            <span>首字母大写</span>
           </button>
         </div>
       </div>

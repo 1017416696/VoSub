@@ -957,6 +957,38 @@ export const useSubtitleStore = defineStore('subtitle', () => {
     }
   }
 
+  // 首字母大写转换函数
+  const capitalizeText = (text: string): string => {
+    return text.replace(/\b\w/g, (char) => char.toUpperCase())
+  }
+
+  // 转换为首字母大写
+  const convertToCapitalize = () => {
+    entries.value.forEach((entry) => {
+      entry.text = capitalizeText(entry.text)
+    })
+
+    addHistory({
+      type: HistoryActionType.BATCH,
+      timestamp: Date.now(),
+      entryId: -1,
+      before: {},
+      after: {},
+      description: '批量转换为首字母大写',
+    })
+  }
+
+  // 单条字幕转换为首字母大写
+  const convertEntryToCapitalize = (entryId: number) => {
+    const entry = entries.value.find((e) => e.id === entryId)
+    if (!entry) return
+
+    const newText = capitalizeText(entry.text)
+    if (newText !== entry.text) {
+      updateEntryText(entryId, newText)
+    }
+  }
+
   // 添加历史记录
   const addHistory = (action: HistoryAction) => {
     if (!tabManager.activeTab) return
@@ -1449,8 +1481,10 @@ export const useSubtitleStore = defineStore('subtitle', () => {
     addSpacesBetweenCJKAndAlphanumeric,
     convertToUpperCase,
     convertToLowerCase,
+    convertToCapitalize,
     convertEntryToUpperCase,
     convertEntryToLowerCase,
+    convertEntryToCapitalize,
     detectTimeConflicts,
     assignSubtitleToTracks,
     undo,

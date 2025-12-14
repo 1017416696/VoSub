@@ -588,6 +588,7 @@ fn update_recent_files_menu(app_handle: tauri::AppHandle, files: Vec<RecentFileI
                 .separator()
                 .text("batch-to-uppercase", "批量转换为大写")
                 .text("batch-to-lowercase", "批量转换为小写")
+                .text("batch-to-capitalize", "批量首字母大写")
                 .build()
                 .map_err(|e| e.to_string())?;
 
@@ -643,6 +644,7 @@ fn update_recent_files_menu(app_handle: tauri::AppHandle, files: Vec<RecentFileI
                 .separator()
                 .text("batch-to-uppercase", "批量转换为大写")
                 .text("batch-to-lowercase", "批量转换为小写")
+                .text("batch-to-capitalize", "批量首字母大写")
                 .build()
                 .map_err(|e| e.to_string())?;
 
@@ -761,6 +763,7 @@ pub fn run() {
                     .separator()
                     .text("batch-to-uppercase", "批量转换为大写")
                     .text("batch-to-lowercase", "批量转换为小写")
+                    .text("batch-to-capitalize", "批量首字母大写")
                     .build()?;
 
                 // 创建菜单：应用菜单 -> File -> Edit
@@ -833,6 +836,7 @@ pub fn run() {
                     .separator()
                     .text("batch-to-uppercase", "批量转换为大写")
                     .text("batch-to-lowercase", "批量转换为小写")
+                    .text("batch-to-capitalize", "批量首字母大写")
                     .build()?;
 
                 // 创建菜单：File -> Edit
@@ -968,6 +972,18 @@ pub fn run() {
                                 (async () => {
                                     if (window.__globalBatchToLowerCase && typeof window.__globalBatchToLowerCase === 'function') {
                                         await window.__globalBatchToLowerCase();
+                                    }
+                                })();
+                            "#;
+                            let _ = window.eval(js_code);
+                        }
+                    }
+                    "batch-to-capitalize" => {
+                        if let Some(window) = app_handle.get_webview_window("main") {
+                            let js_code = r#"
+                                (async () => {
+                                    if (window.__globalBatchToCapitalize && typeof window.__globalBatchToCapitalize === 'function') {
+                                        await window.__globalBatchToCapitalize();
                                     }
                                 })();
                             "#;
