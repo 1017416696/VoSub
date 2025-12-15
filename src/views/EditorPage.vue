@@ -575,12 +575,16 @@ const moveSubtitlePosition = async (deltaMs: number) => {
     startMs = 0
     endMs += offset
   }
-  const msToTimeStamp = (ms: number): TimeStamp => ({
-    hours: Math.floor(ms / 3600000),
-    minutes: Math.floor((ms % 3600000) / 60000),
-    seconds: Math.floor((ms % 60000) / 1000),
-    milliseconds: ms % 1000
-  })
+  const msToTimeStamp = (ms: number): TimeStamp => {
+    // 确保输入是整数，避免浮点数导致 Rust 后端解析失败
+    ms = Math.round(ms)
+    return {
+      hours: Math.floor(ms / 3600000),
+      minutes: Math.floor((ms % 3600000) / 60000),
+      seconds: Math.floor((ms % 60000) / 1000),
+      milliseconds: ms % 1000
+    }
+  }
   subtitleStore.updateEntryTime(currentEntry.value.id, msToTimeStamp(startMs), msToTimeStamp(endMs), true)
   if (subtitleStore.currentFilePath) await subtitleStore.saveToFile()
 }

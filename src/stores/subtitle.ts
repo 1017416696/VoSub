@@ -480,6 +480,8 @@ export const useSubtitleStore = defineStore('subtitle', () => {
     }
 
     const msToTimeStamp = (ms: number): TimeStamp => {
+      // 确保输入是整数，避免浮点数导致 Rust 后端解析失败
+      ms = Math.round(ms)
       const totalSeconds = Math.floor(ms / 1000)
       return {
         hours: Math.floor(totalSeconds / 3600),
@@ -553,6 +555,8 @@ export const useSubtitleStore = defineStore('subtitle', () => {
     const index = currentEntries.findIndex((e) => e.id === entryId)
     
     const msToTimeStamp = (ms: number): TimeStamp => {
+      // 确保输入是整数，避免浮点数导致 Rust 后端解析失败
+      ms = Math.round(ms)
       const totalSeconds = Math.floor(ms / 1000)
       return {
         hours: Math.floor(totalSeconds / 3600),
@@ -730,6 +734,8 @@ export const useSubtitleStore = defineStore('subtitle', () => {
     const currentEntries = entries.value
 
     const msToTimeStamp = (ms: number): TimeStamp => {
+      // 确保输入是整数，避免浮点数导致 Rust 后端解析失败
+      ms = Math.round(ms)
       const totalSeconds = Math.floor(ms / 1000)
       return {
         hours: Math.floor(totalSeconds / 3600),

@@ -13,6 +13,8 @@ export function timeStampToMs(time: TimeStamp): number {
  * 将毫秒数转换为 TimeStamp
  */
 export function msToTimeStamp(ms: number): TimeStamp {
+  // 确保输入是整数，避免浮点数导致 Rust 后端解析失败
+  ms = Math.round(ms)
   const hours = Math.floor(ms / 3600000)
   ms = ms % 3600000
   const minutes = Math.floor(ms / 60000)
