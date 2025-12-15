@@ -1212,9 +1212,10 @@ pub fn run() {
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|app_handle, event| {
-            // 处理文件关联打开事件
-            if let tauri::RunEvent::Opened { urls } = event {
+        .run(|_app_handle, _event| {
+            // macOS: 处理文件关联打开事件（RunEvent::Opened 仅在 macOS 上可用）
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Opened { urls } = _event {
                 for url in urls {
                     // 将 file:// URL 转换为路径
                     if let Ok(path) = url.to_file_path() {
@@ -1230,7 +1231,7 @@ pub fn run() {
                                 }
                                 
                                 // 同时尝试发送事件（如果前端已准备好）
-                                if let Some(window) = app_handle.get_webview_window("main") {
+                                if let Some(window) = _app_handle.get_webview_window("main") {
                                     let _ = window.emit("file-association-open", path_string);
                                 }
                             }
