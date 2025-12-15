@@ -38,6 +38,15 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"]
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
+    "fileAssociations": [
+      {
+        "ext": ["srt"],
+        "name": "SRT Subtitle",
+        "description": "SRT 字幕文件",
+        "role": "Editor",
+        "mimeType": "application/x-subrip"
+      }
+    ]
   }
 }

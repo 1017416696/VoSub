@@ -27,10 +27,6 @@ app.use(pinia)
 app.use(router)
 app.use(ElementPlus)
 
-// 获取 store 的引用
-const subtitleStore = pinia.state.value.subtitle
-const audioStore = pinia.state.value.audio
-
 // 全局打开文件函数
 const globalOpenFile = async () => {
   try {
@@ -668,19 +664,6 @@ listen<void>('menu:save', async () => {
   }
 }).catch(() => { })
 
-// 全局键盘快捷键监听（仅处理打开文件，保存由 EditorPage 组件处理）
-document.addEventListener('keydown', (e: KeyboardEvent) => {
-  const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform)
-
-  // 检查 Cmd+O (macOS) 或 Ctrl+O (Windows/Linux)
-  // 仅在编辑器页面未加载时使用这个全局快捷键
-  if ((isMac && e.metaKey && e.key.toLowerCase() === 'o') ||
-    (!isMac && e.ctrlKey && e.key.toLowerCase() === 'o')) {
-    // 如果编辑器页面已注册自己的快捷键处理，就不必理会这个
-    // 这是备用方案
-  }
-}, true)
-
 app.mount('#app')
 
 // 全局禁用所有按钮的 Tab 键导航
@@ -705,7 +688,100 @@ observer.observe(document.body, {
   subtree: true,
 })
 
-// 应用启动后初始化最近文件菜单
+// 通过文件关联打开文件的处理函数
+const openFileFromAssociation = async (filePath: string) => {
+  logger.info('通过文件关联打开文件', { path: filePath })
+  
+  try {
+    const loadStartTime = Date.now()
+    const { useSubtitleStore } = await import('./stores/subtitle')
+    const { useConfigStore } = await import('./stores/config')
+    const { ElMessageBox } = await import('element-plus')
+    const store = useSubtitleStore()
+    const configStore = useConfigStore()
+    
+    // 检查文件写入权限
+    const permissionCheck = (await invoke('check_file_write_permission', {
+      filePath: filePath,
+    })) as {
+      readable: boolean
+      writable: boolean
+      error_message: string | null
+      is_locked: boolean
+    }
+
+    if (!permissionCheck.writable) {
+      if (permissionCheck.is_locked) {
+        // 文件被锁定，提供解锁选项
+        try {
+          await ElMessageBox.confirm(
+            '文件已被锁定，无法写入。\n\n点击「解锁」按钮可以解除锁定并继续编辑。',
+            '文件已锁定',
+            { confirmButtonText: '解锁', cancelButtonText: '取消', type: 'warning' }
+          )
+          // 用户点击解锁
+          await invoke('unlock_file_cmd', { filePath: filePath })
+        } catch {
+          // 用户点击取消
+          logger.warn('用户取消解锁文件', { path: filePath })
+          return
+        }
+      } else {
+        // 其他权限问题
+        const warningMessage = permissionCheck.error_message || '文件无法写入。'
+        await ElMessageBox.alert(warningMessage, '无法打开文件', {
+          confirmButtonText: '我知道了',
+          type: 'warning',
+          dangerouslyUseHTMLString: true,
+        })
+        logger.warn('文件权限受限，取消打开', { path: filePath })
+        return
+      }
+    }
+
+    const srtFile = (await invoke('read_srt', { filePath: filePath })) as any
+    await store.loadSRTFile(srtFile)
+
+    const loadDuration = Date.now() - loadStartTime
+    logger.info('打开 SRT 文件', {
+      path: filePath,
+      entries: srtFile.entries?.length,
+      loadTime: `${loadDuration}ms`,
+    })
+
+    // 添加到最近文件列表
+    configStore.addRecentFile(filePath)
+    
+    // 更新菜单
+    await updateRecentFilesMenu()
+
+    // 如果当前不在编辑器页面，导航到编辑器
+    if (router.currentRoute.value.path !== '/editor') {
+      router.push('/editor')
+    }
+  } catch (error) {
+    logger.error('通过文件关联打开文件失败', { error: String(error), path: filePath })
+  }
+}
+
+// 应用启动后初始化
 setTimeout(async () => {
+  // 初始化最近文件菜单
   await updateRecentFilesMenu()
+  
+  // 检查是否有通过文件关联待打开的文件（冷启动场景）
+  try {
+    const pendingFile = await invoke('get_pending_file_open') as string | null
+    if (pendingFile) {
+      logger.info('检测到待打开的文件关联文件', { path: pendingFile })
+      await openFileFromAssociation(pendingFile)
+    }
+  } catch (error) {
+    logger.error('检查待打开文件失败', { error: String(error) })
+  }
 }, 100)
+
+// 监听文件关联打开事件（应用已运行时双击 .srt 文件）
+listen<string>('file-association-open', async (event) => {
+  await openFileFromAssociation(event.payload)
+}).catch(() => { })

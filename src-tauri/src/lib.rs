@@ -34,11 +34,16 @@ use firered_corrector::{
 };
 use waveform_generator::{generate_waveform_with_progress, ProgressCallback};
 use std::fs;
+use std::sync::Mutex;
 use tauri::menu::{MenuBuilder, MenuItem, PredefinedMenuItem, SubmenuBuilder};
 use tauri::{Emitter, Manager};
 use tauri_plugin_prevent_default::Flags;
 use tauri_plugin_log::{Target, TargetKind, TimezoneStrategy, RotationStrategy};
 use log::info;
+use once_cell::sync::Lazy;
+
+// 全局状态：存储通过文件关联打开的待处理文件路径
+static PENDING_FILE_OPEN: Lazy<Mutex<Option<String>>> = Lazy::new(|| Mutex::new(None));
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
@@ -128,6 +133,13 @@ fn trigger_open_file(window: tauri::Window) -> Result<(), String> {
 #[tauri::command]
 fn check_file_exists(file_path: String) -> bool {
     std::path::Path::new(&file_path).exists()
+}
+
+/// 获取并清除待打开的文件路径（用于文件关联打开）
+#[tauri::command]
+fn get_pending_file_open() -> Option<String> {
+    let mut pending = PENDING_FILE_OPEN.lock().unwrap();
+    pending.take()
 }
 
 /// 获取日志目录路径
@@ -1128,6 +1140,7 @@ pub fn run() {
             generate_audio_waveform,
             trigger_open_file,
             check_file_exists,
+            get_pending_file_open,
             update_recent_files_menu,
             get_log_path,
             show_log_in_folder,
@@ -1181,6 +1194,33 @@ pub fn run() {
             export_markdown,
             export_fcpxml
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            // 处理文件关联打开事件
+            if let tauri::RunEvent::Opened { urls } = event {
+                for url in urls {
+                    // 将 file:// URL 转换为路径
+                    if let Ok(path) = url.to_file_path() {
+                        if let Some(path_str) = path.to_str() {
+                            // 检查是否是 .srt 文件
+                            if path_str.to_lowercase().ends_with(".srt") {
+                                info!("通过文件关联打开 SRT 文件: {}", path_str);
+                                let path_string = path_str.to_string();
+                                
+                                // 存储到全局状态（供前端启动后查询）
+                                if let Ok(mut pending) = PENDING_FILE_OPEN.lock() {
+                                    *pending = Some(path_string.clone());
+                                }
+                                
+                                // 同时尝试发送事件（如果前端已准备好）
+                                if let Some(window) = app_handle.get_webview_window("main") {
+                                    let _ = window.emit("file-association-open", path_string);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
 }
