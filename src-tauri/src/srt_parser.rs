@@ -174,7 +174,26 @@ pub fn unlock_file(file_path: &str) -> Result<(), String> {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+/// 解锁文件 (移除 Windows 的只读属性)
+#[cfg(target_os = "windows")]
+pub fn unlock_file(file_path: &str) -> Result<(), String> {
+    use std::process::Command;
+
+    // 使用 attrib 命令移除只读属性
+    let output = Command::new("attrib")
+        .args(["-R", file_path])
+        .output()
+        .map_err(|e| format!("执行权限修改命令失败: {}", e))?;
+
+    if output.status.success() {
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        Err(format!("修改文件权限失败: {}", stderr))
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub fn unlock_file(_file_path: &str) -> Result<(), String> {
     Ok(())
 }
@@ -206,9 +225,11 @@ pub fn check_file_permission(file_path: &str) -> FilePermissionCheck {
         Err(e) => {
             let is_permission_denied = e.kind() == std::io::ErrorKind::PermissionDenied;
 
-            // 在 macOS 上，Permission denied 通常可以通过解锁来解决
-            // 包括：文件被锁定、只读权限、从外部来源获取的文件等
-            let is_locked = is_permission_denied && cfg!(target_os = "macos");
+            // 在 macOS 和 Windows 上，Permission denied 通常可以通过解锁来解决
+            // macOS: 文件被锁定、只读权限、从外部来源获取的文件等
+            // Windows: 只读属性、文件被其他程序占用等
+            let is_locked =
+                is_permission_denied && (cfg!(target_os = "macos") || cfg!(target_os = "windows"));
 
             let message = if is_locked {
                 "文件已被锁定或没有写入权限。\n\n点击「解锁」按钮可以尝试解除限制并继续编辑。"
