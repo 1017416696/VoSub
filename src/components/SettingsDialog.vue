@@ -1032,7 +1032,7 @@ const splitShortcut = (key: string): string[] => {
 }
 
 // 应用版本
-const appVersion = '0.0.4'
+const appVersion = '1.0.0'
 
 // 标点符号列表折叠状态
 const punctuationExpanded = ref(false)
@@ -2149,12 +2149,12 @@ const shortcutCategories = computed(() => {
               
               <div class="about-content">
                 <div class="app-logo">
-                  <img src="/favicon.ico" alt="VoSub" class="logo-img" />
+                  <img src="/icon-concept-6-small-v.png" alt="VoSub" class="logo-img" />
                 </div>
                 <h3 class="app-name">VoSub</h3>
                 <p class="app-version">版本 {{ appVersion }}</p>
                 <p class="app-desc">
-                  一款简洁高效的 SRT 字幕编辑工具，支持音频波形显示、字幕时间轴编辑等功能。
+                  专业的 SRT 字幕编辑器，支持音频波形可视化、AI 语音转写（Whisper/SenseVoice）、智能纠错、多格式导出等功能。
                 </p>
                 <div class="app-links">
                   <span class="copyright">© 2025 Penrose</span>
