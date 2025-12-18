@@ -64,6 +64,11 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           args: ${{ matrix.args }}
+          tagName: ${{ github.ref_name }}
+          releaseName: 'VoSub ${{ github.ref_name }}'
+          releaseBody: '请在下方下载对应平台的安装包。'
+          releaseDraft: false
+          prerelease: false
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
