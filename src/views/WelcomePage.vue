@@ -65,9 +65,9 @@ const currentModelName = computed(() => {
   }
   const model = availableModels.value.find(m => m.name === configStore.whisperModel)
   if (model?.downloaded) return `Whisper ${model.name}`
-  // 如果默认模型未下载，显示第一个已下载的模型或 base
+  // 如果默认模型未下载，显示第一个已下载的模型或 tiny（首次使用默认）
   const firstDownloaded = downloadedModels.value[0]
-  return firstDownloaded ? `Whisper ${firstDownloaded.name}` : 'Whisper base'
+  return firstDownloaded ? `Whisper ${firstDownloaded.name}` : 'Whisper tiny'
 })
 
 // 是否显示引擎切换下拉
@@ -359,29 +359,61 @@ const startWhisperTranscription = async (audioPath: string) => {
   }
   
   if (!whisperEnvStatus.ready) {
-    // 需要安装环境
-    const confirm = await ElMessageBox.confirm(
-      'Whisper 环境尚未安装，需要下载约 200MB-2.5GB 的依赖（取决于 CPU/GPU 版本）。请先在设置中安装环境。',
-      '需要安装环境',
-      { confirmButtonText: '打开设置', cancelButtonText: '取消', type: 'info' }
-    ).catch(() => false)
-    if (confirm) {
-      // 触发打开设置对话框
-      const event = new CustomEvent('open-settings', { detail: { tab: 'whisper' } })
-      window.dispatchEvent(event)
+    // 首次使用，检查 uv 是否安装
+    if (!whisperEnvStatus.uv_installed) {
+      await ElMessageBox.alert(
+        '首次使用需要安装 uv 包管理器。\n\n安装命令：\nmacOS/Linux: curl -LsSf https://astral.sh/uv/install.sh | sh\nWindows: powershell -c "irm https://astral.sh/uv/install.ps1 | iex"\n\n安装后请重启应用。',
+        '需要安装 uv',
+        { confirmButtonText: '确定', type: 'warning' }
+      )
+      return
     }
-    return
+
+    // 检测是否使用 GPU：macOS 不支持 CUDA，Windows 才尝试 GPU
+    const isMacOS = navigator.platform.toLowerCase().includes('mac')
+    const useGpu = !isMacOS // Windows 默认尝试 GPU 版本
+
+    // 自动安装 Whisper 环境
+    isTranscribing.value = true
+    isCancelled.value = false
+    transcriptionProgress.value = 0
+    transcriptionMessage.value = `首次使用，正在安装 Whisper ${useGpu ? 'GPU' : 'CPU'} 环境...`
+    showTranscriptionDialog.value = true
+
+    // 监听安装进度
+    const unlistenInstall = await listen<{ progress: number; current_text: string }>('whisper-progress', (event) => {
+      transcriptionProgress.value = event.payload.progress
+      transcriptionMessage.value = event.payload.current_text
+    })
+
+    try {
+      await invoke('install_whisper', { useGpu })
+      // 刷新状态
+      whisperEnvStatus = await invoke<WhisperEnvStatus>('check_whisper_env_status')
+    } catch (error) {
+      unlistenInstall()
+      isTranscribing.value = false
+      showTranscriptionDialog.value = false
+      const errorMsg = error instanceof Error ? error.message : String(error)
+      await ElMessageBox.alert(`环境安装失败：${errorMsg}`, '安装失败', { confirmButtonText: '确定', type: 'error' })
+      return
+    }
+    unlistenInstall()
+
+    if (isCancelled.value) return
   }
 
   isTranscribing.value = true
   isCancelled.value = false
   transcriptionProgress.value = 0
+  // 首次使用默认 tiny 模型
+  const modelToUse = downloadedModels.value.length > 0 ? configStore.whisperModel : 'tiny'
   transcriptionMessage.value = '正在转录音频（首次使用模型时会自动下载）...'
   showTranscriptionDialog.value = true
   
   const entries = await invoke<SubtitleEntry[]>('transcribe_audio_to_subtitles', {
     audioPath,
-    modelSize: configStore.whisperModel,
+    modelSize: modelToUse,
     language: configStore.whisperLanguage,
   })
   
@@ -639,9 +671,16 @@ const getWhisperModelDesc = (modelName: string): string => {
                       <span class="model-desc">{{ getWhisperModelDesc(model.name) }}</span>
                       <i v-if="configStore.transcriptionEngine === 'whisper' && model.name === configStore.whisperModel" class="i-mdi-check model-check"></i>
                     </el-dropdown-item>
-                    <el-dropdown-item v-if="downloadedModels.length === 0" disabled class="no-model-hint">
-                      <i class="i-mdi-information-outline"></i>
-                      <span>请在设置中下载模型</span>
+                    <!-- 没有下载模型时，显示 tiny 作为默认选项 -->
+                    <el-dropdown-item
+                      v-if="downloadedModels.length === 0"
+                      command="tiny"
+                      class="model-option"
+                      :class="{ 'is-active': configStore.transcriptionEngine === 'whisper' }"
+                    >
+                      <span class="model-name">tiny</span>
+                      <span class="model-desc">最快速度（首次自动下载）</span>
+                      <i v-if="configStore.transcriptionEngine === 'whisper'" class="i-mdi-check model-check"></i>
                     </el-dropdown-item>
                     <!-- SenseVoice (仅在已安装时显示) -->
                     <template v-if="sensevoiceEnvStatus.ready">
@@ -1364,10 +1403,9 @@ const getWhisperModelDesc = (modelName: string): string => {
 
 .progress-stats {
   display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 12px;
-  flex-wrap: wrap;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
 }
 
 .progress-percentage {
@@ -1375,7 +1413,6 @@ const getWhisperModelDesc = (modelName: string): string => {
   font-weight: 700;
   color: #409eff;
   font-variant-numeric: tabular-nums;
-  flex-shrink: 0;
 }
 
 /* 转录状态文字 */
@@ -1389,9 +1426,9 @@ const getWhisperModelDesc = (modelName: string): string => {
 .progress-status {
   font-size: 13px;
   color: #909399;
-  text-align: right;
+  text-align: center;
   flex: 1;
-  min-width: 150px;
+  word-break: break-word;
 }
 
 /* 提示信息 */
