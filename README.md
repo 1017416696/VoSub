@@ -28,7 +28,7 @@
 - 双击 `.srt` 文件直接打开
 
 ### 🎵 音频同步
-- 音频波形可视化（WaveSurfer.js）
+- 音频波形可视化（Canvas 原生渲染）
 - 支持 MP3、WAV、AAC、FLAC、OGG 等格式
 - 音频与字幕时间轴联动
 
@@ -130,7 +130,7 @@ src-tauri/              # 后端 (Rust)
 - **Vite 7** (构建工具)
 - **Pinia** (状态管理)
 - **Tailwind CSS 4** + **Element Plus** (UI)
-- **WaveSurfer.js** (音频波形)
+- **Canvas** (音频波形渲染)
 - **Howler.js** (音频播放)
 
 ### 后端

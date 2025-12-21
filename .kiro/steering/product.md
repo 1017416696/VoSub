@@ -5,7 +5,7 @@ VoSub is a professional desktop subtitle editor for SRT (SubRip) files. Built wi
 ## Core Features
 
 - Real-time subtitle editing with undo/redo (100 action history)
-- Audio waveform visualization with WaveSurfer.js
+- Audio waveform visualization with native Canvas
 - Multi-format audio support (MP3, WAV, AAC, FLAC, OGG)
 - Time conflict detection (overlapping subtitles)
 - Multi-track subtitle display
