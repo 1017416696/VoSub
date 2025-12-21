@@ -70,9 +70,12 @@ export default defineConfig({
     outDir: './dist',
     // See https://web-platform-dx.github.io/web-features/ for Vite 7 default targets (baseline-widely-available)
     // See https://v2.tauri.app/reference/webview-versions/ for Tauri details
+    // macOS: Safari 16+, Windows: Chrome 107+, Linux: WebKitGTK (similar to Safari)
     target: PLATFORM == 'windows'
         ? 'chrome107'
-        : 'safari16',
+        : PLATFORM == 'linux'
+          ? 'chrome107'  // Linux WebKitGTK 使用类似 Chrome 的引擎
+          : 'safari16',  // macOS
     minify: !process.env.TAURI_DEBUG ? 'esbuild' : false,
     emptyOutDir: true,
     chunkSizeWarningLimit: 1024,

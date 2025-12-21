@@ -682,6 +682,61 @@ fn update_recent_files_menu(app_handle: tauri::AppHandle, files: Vec<RecentFileI
             // 使用 app_handle.set_menu 而不是 window.set_menu
             app_handle.set_menu(menu).map_err(|e| e.to_string())?;
         }
+
+        #[cfg(target_os = "linux")]
+        {
+            use tauri::menu::{MenuItem, PredefinedMenuItem};
+            
+            let open_item = MenuItem::with_id(&app_handle, "open", "打开", true, Some("Ctrl+O")).map_err(|e| e.to_string())?;
+            let save_item = MenuItem::with_id(&app_handle, "save", "保存", true, Some("Ctrl+S")).map_err(|e| e.to_string())?;
+            let export_dialog_item = MenuItem::with_id(&app_handle, "export-dialog", "导出", true, Some("Ctrl+E")).map_err(|e| e.to_string())?;
+            let close_tab_item = MenuItem::with_id(&app_handle, "close-tab", "关闭标签页", true, Some("Ctrl+W")).map_err(|e| e.to_string())?;
+            let close_window_item = MenuItem::with_id(&app_handle, "close-window", "关闭窗口", true, Some("Ctrl+Q")).map_err(|e| e.to_string())?;
+            let add_dict_item = MenuItem::with_id(&app_handle, "add-to-dictionary", "添加到本地词典", true, Some("Ctrl+D")).map_err(|e| e.to_string())?;
+            let clear_corrections_item = MenuItem::with_id(&app_handle, "clear-all-corrections", "清除所有校正标记", false, None::<&str>).map_err(|e| e.to_string())?;
+            let file_menu = SubmenuBuilder::new(&app_handle, "文件")
+                .item(&open_item)
+                .item(&recent_menu)
+                .item(&save_item)
+                .item(&export_dialog_item)
+                .separator()
+                .item(&close_tab_item)
+                .item(&close_window_item)
+                .build()
+                .map_err(|e| e.to_string())?;
+
+            let edit_menu = SubmenuBuilder::new(&app_handle, "编辑")
+                .item(&PredefinedMenuItem::undo(&app_handle, Some("撤销")).map_err(|e| e.to_string())?)
+                .item(&PredefinedMenuItem::redo(&app_handle, Some("重做")).map_err(|e| e.to_string())?)
+                .separator()
+                .item(&PredefinedMenuItem::cut(&app_handle, Some("剪切")).map_err(|e| e.to_string())?)
+                .item(&PredefinedMenuItem::copy(&app_handle, Some("复制")).map_err(|e| e.to_string())?)
+                .item(&PredefinedMenuItem::paste(&app_handle, Some("粘贴")).map_err(|e| e.to_string())?)
+                .item(&PredefinedMenuItem::select_all(&app_handle, Some("全选")).map_err(|e| e.to_string())?)
+                .separator()
+                .item(&add_dict_item)
+                .separator()
+                .text("batch-ai-correction", "批量 AI 字幕校正")
+                .item(&clear_corrections_item)
+                .separator()
+                .text("batch-add-cjk-spaces", "批量添加中英文空格")
+                .text("batch-remove-html", "批量移除HTML标签")
+                .text("batch-remove-punctuation", "批量删除标点符号")
+                .separator()
+                .text("batch-to-uppercase", "批量转换为大写")
+                .text("batch-to-lowercase", "批量转换为小写")
+                .text("batch-to-capitalize", "批量首字母大写")
+                .build()
+                .map_err(|e| e.to_string())?;
+
+            let menu = MenuBuilder::new(&app_handle)
+                .item(&file_menu)
+                .item(&edit_menu)
+                .build()
+                .map_err(|e| e.to_string())?;
+
+            app_handle.set_menu(menu).map_err(|e| e.to_string())?;
+        }
     }
     
     Ok(())
@@ -857,6 +912,78 @@ pub fn run() {
                     .build()?;
 
                 // 创建 编辑 菜单（Windows 使用 Ctrl）- 使用预定义菜单项以支持系统快捷键
+                let edit_menu = SubmenuBuilder::new(app, "编辑")
+                    .item(&PredefinedMenuItem::undo(app, Some("撤销"))?)
+                    .item(&PredefinedMenuItem::redo(app, Some("重做"))?)
+                    .separator()
+                    .item(&PredefinedMenuItem::cut(app, Some("剪切"))?)
+                    .item(&PredefinedMenuItem::copy(app, Some("复制"))?)
+                    .item(&PredefinedMenuItem::paste(app, Some("粘贴"))?)
+                    .item(&PredefinedMenuItem::select_all(app, Some("全选"))?)
+                    .separator()
+                    .item(&add_dict_item)
+                    .separator()
+                    .text("batch-ai-correction", "批量 AI 字幕校正")
+                    .item(&clear_corrections_item)
+                    .separator()
+                    .text("batch-add-cjk-spaces", "批量添加中英文空格")
+                    .text("batch-remove-html", "批量移除HTML标签")
+                    .text("batch-remove-punctuation", "批量删除标点符号")
+                    .separator()
+                    .text("batch-to-uppercase", "批量转换为大写")
+                    .text("batch-to-lowercase", "批量转换为小写")
+                    .text("batch-to-capitalize", "批量首字母大写")
+                    .build()?;
+
+                // 创建菜单：File -> Edit
+                let menu = MenuBuilder::new(app)
+                    .item(&file_menu)
+                    .item(&edit_menu)
+                    .build()?;
+
+                app.set_menu(menu)?;
+            }
+
+            // Linux 配置（与 Windows 类似，使用 Ctrl 快捷键）
+            #[cfg(target_os = "linux")]
+            {
+                // 创建 打开最近的文件 子菜单
+                let recent_menu = SubmenuBuilder::new(app, "打开最近的文件")
+                    .text("no-recent", "无最近文件")
+                    .separator()
+                    .text("clear-recent", "清除最近文件")
+                    .build()?;
+
+                // 创建 导出 子菜单
+                let export_menu = SubmenuBuilder::new(app, "导出")
+                    .text("export-txt", "导出为 TXT")
+                    .text("export-vtt", "导出为 VTT")
+                    .text("export-srt", "导出为 SRT")
+                    .text("export-markdown", "导出为 Markdown")
+                    .separator()
+                    .text("export-fcpxml", "导出为 FCPXML...")
+                    .build()?;
+
+                // 创建 文件 菜单（Linux 使用 Ctrl）
+                let open_item = MenuItem::with_id(app, "open", "打开", true, Some("Ctrl+O"))?;
+                let save_item = MenuItem::with_id(app, "save", "保存", true, Some("Ctrl+S"))?;
+                let export_dialog_item = MenuItem::with_id(app, "export-dialog", "导出...", true, Some("Ctrl+E"))?;
+                let close_tab_item = MenuItem::with_id(app, "close-tab", "关闭标签页", true, Some("Ctrl+W"))?;
+                let close_window_item = MenuItem::with_id(app, "close-window", "关闭窗口", true, Some("Ctrl+Q"))?;
+                let add_dict_item = MenuItem::with_id(app, "add-to-dictionary", "添加到本地词典", true, Some("Ctrl+D"))?;
+                let clear_corrections_item = MenuItem::with_id(app, "clear-all-corrections", "清除所有校正标记", false, None::<&str>)?;
+                let file_menu = SubmenuBuilder::new(app, "文件")
+                    .item(&open_item)
+                    .item(&recent_menu)
+                    .item(&save_item)
+                    .item(&export_dialog_item)
+                    .item(&export_menu)
+                    .separator()
+                    .item(&close_tab_item)
+                    .item(&close_window_item)
+                    .build()?;
+
+                // 创建 编辑 菜单（Linux 使用 Ctrl）
                 let edit_menu = SubmenuBuilder::new(app, "编辑")
                     .item(&PredefinedMenuItem::undo(app, Some("撤销"))?)
                     .item(&PredefinedMenuItem::redo(app, Some("重做"))?)
