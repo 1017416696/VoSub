@@ -13,6 +13,7 @@
   <a href="#功能特性">功能特性</a> •
   <a href="#截图预览">截图预览</a> •
   <a href="#安装">安装</a> •
+  <a href="#快速体验">快速体验</a> •
   <a href="#开发">开发</a> •
   <a href="#技术栈">技术栈</a>
 </p>
@@ -63,11 +64,25 @@
 
 - **macOS**: `.dmg` 安装包
 - **Windows**: `.exe` 安装程序
+- **Linux**: `.deb` / `.AppImage` 安装包
 
 ### 系统要求
 
 - macOS 10.15+ (Safari 16+)
-- Windows 10+ (Chrome 107+)
+- Windows 10+ (WebView2)
+- Ubuntu 22.04+ (WebKitGTK 4.1+)
+
+## 快速体验
+
+项目提供了示例文件，方便快速体验功能：
+
+```
+example/
+├── doubao.mp3    # 示例音频文件
+└── doubao.srt    # 示例字幕文件
+```
+
+启动应用后，打开 `example/doubao.srt` 并加载对应的音频文件即可体验完整功能。
 
 ## 开发
 
