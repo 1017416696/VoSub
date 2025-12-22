@@ -145,12 +145,16 @@ onMounted(async () => {
   unlistenTranscriptionProgress = await listen<TranscriptionProgress>('transcription-progress', (event) => {
     transcriptionProgress.value = event.payload.progress
     transcriptionMessage.value = event.payload.current_text
+    // 更新 tray 进度
+    invoke('update_tray_progress', { progress: event.payload.progress }).catch(console.error)
   })
 
   // 监听模型下载进度（单独事件，避免与转录进度冲突）
   unlistenModelDownloadProgress = await listen<TranscriptionProgress>('model-download-progress', (event) => {
     transcriptionProgress.value = event.payload.progress
     transcriptionMessage.value = event.payload.current_text
+    // 更新 tray 进度
+    invoke('update_tray_progress', { progress: event.payload.progress }).catch(console.error)
   })
 
   try { availableModels.value = await invoke<WhisperModelInfo[]>('get_whisper_models_cmd') } catch (e) { console.error(e) }
@@ -333,6 +337,9 @@ const startTranscription = async () => {
       await startWhisperTranscription(selected)
     }
   } catch (error) {
+    // 隐藏 tray 进度
+    await invoke('hide_tray_progress').catch(console.error)
+    
     isTranscribing.value = false
     showTranscriptionDialog.value = false
     if (isCancelled.value) return
@@ -411,6 +418,9 @@ const startWhisperTranscription = async (audioPath: string) => {
   transcriptionMessage.value = '正在转录音频（首次使用模型时会自动下载）...'
   showTranscriptionDialog.value = true
   
+  // 显示 tray 进度
+  await invoke('show_tray_progress').catch(console.error)
+  
   const entries = await invoke<SubtitleEntry[]>('transcribe_audio_to_subtitles', {
     audioPath,
     modelSize: modelToUse,
@@ -477,6 +487,9 @@ const startSensevoiceTranscription = async (audioPath: string) => {
   transcriptionProgress.value = 0
   transcriptionMessage.value = '正在转录音频...'
   showTranscriptionDialog.value = true
+  
+  // 显示 tray 进度
+  await invoke('show_tray_progress').catch(console.error)
   
   const entries = await invoke<SubtitleEntry[]>('transcribe_with_sensevoice_model', {
     audioPath,
@@ -568,6 +581,9 @@ const finishTranscription = async (audioPath: string, entries: SubtitleEntry[]) 
   const fileExtension = audioPath.split('.').pop()?.toLowerCase() || 'mp3'
   await audioStore.loadAudio({ name: fileName, path: audioPath, duration: 0, format: fileExtension })
 
+  // 隐藏 tray 进度
+  await invoke('hide_tray_progress').catch(console.error)
+
   // 关闭对话框，直接跳转编辑器
   showTranscriptionDialog.value = false
   isTranscribing.value = false
@@ -587,6 +603,10 @@ const cancelTranscription = async () => {
   } catch (e) {
     console.error('取消转录失败:', e)
   }
+  
+  // 隐藏 tray 进度
+  await invoke('hide_tray_progress').catch(console.error)
+  
   showTranscriptionDialog.value = false
   isTranscribing.value = false
   isTransitioningToEditor.value = false

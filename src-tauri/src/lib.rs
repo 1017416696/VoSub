@@ -36,6 +36,8 @@ use waveform_generator::{generate_waveform_with_progress, ProgressCallback};
 use std::fs;
 use std::sync::Mutex;
 use tauri::menu::{MenuBuilder, MenuItem, PredefinedMenuItem, SubmenuBuilder};
+use tauri::tray::TrayIconBuilder;
+use tauri::image::Image;
 use tauri::{Emitter, Manager};
 use tauri_plugin_prevent_default::Flags;
 use tauri_plugin_log::{Target, TargetKind, TimezoneStrategy, RotationStrategy};
@@ -44,6 +46,9 @@ use once_cell::sync::Lazy;
 
 // 全局状态：存储通过文件关联打开的待处理文件路径
 static PENDING_FILE_OPEN: Lazy<Mutex<Option<String>>> = Lazy::new(|| Mutex::new(None));
+
+// 全局状态：tray icon ID
+static PROGRESS_TRAY_ID: &str = "progress-tray";
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
@@ -153,6 +158,74 @@ fn get_log_path(app_handle: tauri::AppHandle) -> Result<String, String> {
 #[tauri::command]
 fn get_app_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
+}
+
+/// 更新 tray 进度显示
+#[tauri::command]
+fn update_tray_progress(app: tauri::AppHandle, progress: f64) -> Result<(), String> {
+    // 更新 Dock 图标进度条（macOS）
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(window) = app.get_webview_window("main") {
+            let progress_value = (progress / 100.0).clamp(0.0, 1.0);
+            let progress_u64 = (progress_value * 100.0) as u64;
+            let _ = window.set_progress_bar(tauri::window::ProgressBarState {
+                progress: Some(progress_u64),
+                status: Some(tauri::window::ProgressBarStatus::Normal),
+            });
+        }
+    }
+    
+    // 更新状态栏文字
+    if let Some(tray) = app.tray_by_id(PROGRESS_TRAY_ID) {
+        let percentage = (progress.round() as i32).clamp(0, 100);
+        tray.set_title(Some(&format!("{}%", percentage)))
+            .map_err(|e| format!("更新 tray 标题失败: {}", e))?;
+    }
+    Ok(())
+}
+
+/// 显示 tray 进度图标
+#[tauri::command]
+fn show_tray_progress(app: tauri::AppHandle) -> Result<(), String> {
+    // 检查是否已存在
+    if app.tray_by_id(PROGRESS_TRAY_ID).is_some() {
+        return Ok(());
+    }
+    
+    // 使用简单的黑色圆形图标（18x18）
+    let icon_bytes = include_bytes!("../icons/tray-icon-18.png");
+    let icon = Image::new(icon_bytes, 18, 18);
+    
+    TrayIconBuilder::with_id(PROGRESS_TRAY_ID)
+        .icon(icon)
+        .icon_as_template(true)
+        .title("0%")
+        .build(&app)
+        .map_err(|e| format!("创建 tray 失败: {}", e))?;
+    
+    Ok(())
+}
+
+/// 隐藏 tray 进度图标
+#[tauri::command]
+fn hide_tray_progress(app: tauri::AppHandle) -> Result<(), String> {
+    // 清除 Dock 图标进度条（macOS）
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(window) = app.get_webview_window("main") {
+            let _ = window.set_progress_bar(tauri::window::ProgressBarState {
+                progress: Some(0),
+                status: Some(tauri::window::ProgressBarStatus::None),
+            });
+        }
+    }
+    
+    // 移除状态栏图标
+    if let Some(_tray) = app.tray_by_id(PROGRESS_TRAY_ID) {
+        app.remove_tray_by_id(PROGRESS_TRAY_ID);
+    }
+    Ok(())
 }
 
 /// 在系统文件管理器中打开日志目录
@@ -1343,7 +1416,11 @@ pub fn run() {
             export_markdown,
             export_fcpxml,
             // 版本信息
-            get_app_version
+            get_app_version,
+            // Tray 进度显示
+            show_tray_progress,
+            hide_tray_progress,
+            update_tray_progress
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
