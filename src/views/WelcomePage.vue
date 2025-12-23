@@ -143,6 +143,8 @@ onMounted(async () => {
 
   // 监听转录进度
   unlistenTranscriptionProgress = await listen<TranscriptionProgress>('transcription-progress', (event) => {
+    // 如果已取消，忽略后续进度更新
+    if (isCancelled.value) return
     transcriptionProgress.value = event.payload.progress
     transcriptionMessage.value = event.payload.current_text
     // 更新 tray 进度
@@ -151,6 +153,8 @@ onMounted(async () => {
 
   // 监听模型下载进度（单独事件，避免与转录进度冲突）
   unlistenModelDownloadProgress = await listen<TranscriptionProgress>('model-download-progress', (event) => {
+    // 如果已取消，忽略后续进度更新
+    if (isCancelled.value) return
     transcriptionProgress.value = event.payload.progress
     transcriptionMessage.value = event.payload.current_text
     // 更新 tray 进度
