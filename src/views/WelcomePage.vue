@@ -39,6 +39,14 @@ const audioStore = useAudioStore()
 const configStore = useConfigStore()
 const smartDictionary = useSmartDictionaryStore()
 
+// 🎄 圣诞季节判断
+const isChristmasSeason = computed(() => {
+  const now = new Date()
+  const month = now.getMonth() + 1
+  const day = now.getDate()
+  return month === 12 && day >= 20 && day <= 31
+})
+
 const isDragging = ref(false)
 const isLoading = ref(false)
 const loadingMessage = ref('')
@@ -664,7 +672,7 @@ const getWhisperModelDesc = (modelName: string): string => {
         <div class="get-started">
           <p class="section-title">开始使用</p>
           <div class="action-buttons">
-            <button class="primary-btn" :disabled="isLoading" @click="openSRTFile">
+            <button class="primary-btn" :class="{ 'christmas-btn': isChristmasSeason }" :disabled="isLoading" @click="openSRTFile">
               <span v-if="!isLoading">打开字幕文件</span>
               <span v-else>{{ loadingMessage }}</span>
             </button>
@@ -971,6 +979,17 @@ const getWhisperModelDesc = (modelName: string): string => {
 .primary-btn:disabled {
   opacity: 0.7;
   cursor: not-allowed;
+}
+
+/* 🎄 圣诞按钮样式 */
+.primary-btn.christmas-btn {
+  background: linear-gradient(135deg, #dc2626, #b91c1c);
+  box-shadow: 0 2px 8px rgba(220, 38, 38, 0.25);
+}
+
+.primary-btn.christmas-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #ef4444, #dc2626);
+  box-shadow: 0 4px 12px rgba(220, 38, 38, 0.3);
 }
 
 /* 次要按钮 */

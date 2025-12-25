@@ -672,12 +672,31 @@ const getSubtitleStyle = (subtitle: SubtitleEntry) => {
   const left = timeToPixel(start)
   const width = timeToPixel(end - start)
 
-  // 使用缓存的 hue 值
-  const hue = getSubtitleHue(subtitle.id)
+  // 🎄 圣诞季节判断
+  const isChristmasSeason = () => {
+    const now = new Date()
+    const month = now.getMonth() + 1
+    const day = now.getDate()
+    return month === 12 && day >= 20 && day <= 31
+  }
 
   // 如果被选中，使用更亮的颜色作为基础色
   const isSelected = selectedSubtitleIds.value.has(subtitle.id)
-  const baseColor = isSelected ? `hsl(${hue}, 75%, 70%)` : `hsl(${hue}, 70%, 65%)`
+  const isActive = props.currentSubtitleId === subtitle.id
+
+  let baseColor: string
+  if (isChristmasSeason()) {
+    // 🎄 圣诞配色：选中/激活用红色，普通用绿色
+    if (isSelected || isActive) {
+      baseColor = 'linear-gradient(135deg, rgba(220, 38, 38, 0.9), rgba(185, 28, 28, 0.9))'
+    } else {
+      baseColor = 'linear-gradient(135deg, rgba(34, 197, 94, 0.85), rgba(22, 163, 74, 0.85))'
+    }
+  } else {
+    // 使用缓存的 hue 值
+    const hue = getSubtitleHue(subtitle.id)
+    baseColor = isSelected ? `hsl(${hue}, 75%, 70%)` : `hsl(${hue}, 70%, 65%)`
+  }
 
   // 根据缩放级别动态调整最小宽度
   // 缩放越小，最小宽度也越小，避免字幕块过长挤占空间
@@ -693,7 +712,7 @@ const getSubtitleStyle = (subtitle: SubtitleEntry) => {
     left: left + 'px',
     width: Math.max(width, minWidth) + 'px',
     top: top + 'px',
-    backgroundColor: baseColor
+    background: baseColor
   }
 }
 
@@ -2662,5 +2681,42 @@ defineExpose({
   height: 1px;
   background: #e2e8f0;
   margin: 4px 8px;
+}
+
+/* 🎄 圣诞节字幕块样式 */
+:global(.christmas-season) .subtitle-block {
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.85), rgba(22, 163, 74, 0.85)) !important;
+  border-color: #16a34a !important;
+}
+
+:global(.christmas-season) .subtitle-block::after {
+  content: '❄';
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+:global(.christmas-season) .subtitle-block:hover {
+  border-color: #15803d !important;
+  box-shadow: 0 2px 8px rgba(34, 197, 94, 0.4) !important;
+}
+
+:global(.christmas-season) .subtitle-block.is-active,
+:global(.christmas-season) .subtitle-block.is-selected {
+  background: linear-gradient(135deg, rgba(220, 38, 38, 0.9), rgba(185, 28, 28, 0.9)) !important;
+  border-color: #dc2626 !important;
+  outline-color: #dc2626 !important;
+}
+
+:global(.christmas-season) .subtitle-block.is-active::after,
+:global(.christmas-season) .subtitle-block.is-selected::after {
+  content: '🎄';
+}
+
+:global(.christmas-season) .subtitle-block.is-selected:hover {
+  outline-color: #b91c1c !important;
 }
 </style>

@@ -512,4 +512,24 @@ defineExpose({
   font-weight: 500;
   box-shadow: 0 0 0 1px rgba(255, 215, 0, 0.3);
 }
+
+/* 🎄 圣诞节字幕项样式 */
+:global(.christmas-season) .subtitle-item {
+  border-left: 3px solid #22c55e;
+}
+
+:global(.christmas-season) .subtitle-item.is-selected {
+  background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%);
+  border-left-color: #dc2626;
+  border-color: #dc2626;
+}
+
+:global(.christmas-season) .subtitle-item.is-selected .item-number {
+  background: rgba(220, 38, 38, 0.1);
+  color: #dc2626;
+}
+
+:global(.christmas-season) .subtitle-item.is-selected .item-text {
+  color: #991b1b;
+}
 </style>
