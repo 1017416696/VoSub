@@ -2854,8 +2854,9 @@ const shortcutCategories = computed(() => {
   font-size: 14px;
   color: #666;
   line-height: 1.6;
-  max-width: 360px;
+  max-width: 420px;
   margin-bottom: 24px;
+  text-align: center;
 }
 
 .update-section {
