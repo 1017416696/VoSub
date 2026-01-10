@@ -2472,7 +2472,7 @@ const shortcutCategories = computed(() => {
                 </div>
 
                 <div class="app-links">
-                  <span class="copyright">© 2025 Penrose</span>
+                  <span class="copyright">© {{ new Date().getFullYear() }} Penrose</span>
                 </div>
               </div>
             </div>
