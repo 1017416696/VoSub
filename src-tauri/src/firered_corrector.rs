@@ -1432,6 +1432,84 @@ if __name__ == "__main__":
 }
 
 
+/// 从 Python 错误堆栈中提取用户友好的错误信息
+fn extract_user_friendly_error(stderr: &str, exit_code: Option<i32>) -> String {
+    let stderr_lower = stderr.to_lowercase();
+    
+    // 检查常见错误类型并返回友好提示
+    if stderr_lower.contains("no module named") {
+        if stderr_lower.contains("fireredasr") {
+            return "校正失败：FireRedASR 模块未安装，请重新安装环境".to_string();
+        }
+        if stderr_lower.contains("torch") {
+            return "校正失败：PyTorch 未安装，请重新安装环境".to_string();
+        }
+        if stderr_lower.contains("pydub") {
+            return "校正失败：pydub 模块未安装，请重新安装环境".to_string();
+        }
+        // 提取模块名
+        if let Some(pos) = stderr.find("No module named") {
+            let module_info = &stderr[pos..].lines().next().unwrap_or("");
+            return format!("校正失败：Python 模块缺失 - {}", module_info);
+        }
+    }
+    
+    if stderr_lower.contains("模型未下载") || stderr_lower.contains("model not found") {
+        return "校正失败：FireRedASR 模型未下载，请先在设置中下载模型".to_string();
+    }
+    
+    if stderr_lower.contains("out of memory") || stderr_lower.contains("cuda out of memory") {
+        return "校正失败：内存不足，请关闭其他程序后重试，或切换到 CPU 模式".to_string();
+    }
+    
+    if stderr_lower.contains("no such file") || stderr_lower.contains("filenotfounderror") {
+        if stderr_lower.contains("audio") || stderr_lower.contains(".mp3") || stderr_lower.contains(".wav") {
+            return "校正失败：音频文件不存在或路径无效".to_string();
+        }
+        if stderr_lower.contains(".srt") {
+            return "校正失败：字幕文件不存在或路径无效".to_string();
+        }
+        return "校正失败：文件不存在，请检查文件路径".to_string();
+    }
+    
+    if stderr_lower.contains("permission denied") {
+        return "校正失败：文件访问权限不足".to_string();
+    }
+    
+    if stderr_lower.contains("could not find a version") || stderr_lower.contains("couldnotfind") {
+        return "校正失败：音频格式不支持，请使用 MP3、WAV、AAC、FLAC 或 OGG 格式".to_string();
+    }
+    
+    if stderr_lower.contains("runtimeerror") && stderr_lower.contains("cuda") {
+        return "校正失败：CUDA 运行时错误，请检查显卡驱动或切换到 CPU 模式".to_string();
+    }
+    
+    // 尝试提取 Python 异常的最后一行（通常是最有用的信息）
+    let lines: Vec<&str> = stderr.lines().collect();
+    for line in lines.iter().rev() {
+        let trimmed = line.trim();
+        // 跳过空行和堆栈跟踪行
+        if trimmed.is_empty() || trimmed.starts_with("File ") || trimmed.starts_with("at ") {
+            continue;
+        }
+        // 找到异常信息行
+        if trimmed.contains("Error:") || trimmed.contains("Exception:") {
+            return format!("校正失败：{}", trimmed);
+        }
+        // 如果是以异常类型开头的行
+        if trimmed.ends_with("Error") || trimmed.ends_with("Exception") 
+           || trimmed.contains("Error:") || trimmed.contains("Exception:") {
+            return format!("校正失败：{}", trimmed);
+        }
+    }
+    
+    // 如果无法解析，返回通用错误信息，包含退出码
+    format!(
+        "校正脚本执行失败 (退出码: {:?})，请查看日志获取详细信息",
+        exit_code
+    )
+}
+
 /// 毫秒转 TimeStamp
 fn ms_to_timestamp(ms: u32) -> TimeStamp {
     TimeStamp {
@@ -1527,10 +1605,25 @@ pub async fn correct_with_firered(
     let progress_file = std::env::temp_dir().join(format!("firered_progress_{}.json", std::process::id()));
     let _ = std::fs::remove_file(&progress_file); // 确保文件不存在
     
-    // 执行 Python 脚本
+    // 创建 stderr 输出文件路径，用于捕获错误信息
+    let stderr_file = std::env::temp_dir().join(format!("firered_stderr_{}.txt", std::process::id()));
+    let _ = std::fs::remove_file(&stderr_file); // 确保文件不存在
+    
+    // 创建 stdout 输出文件路径，用于捕获可能的错误输出
+    let stdout_file = std::env::temp_dir().join(format!("firered_stdout_{}.txt", std::process::id()));
+    let _ = std::fs::remove_file(&stdout_file); // 确保文件不存在
+    
+    let stderr_output = std::fs::File::create(&stderr_file)
+        .map_err(|e| format!("创建错误输出文件失败: {}", e))?;
+    let stdout_output = std::fs::File::create(&stdout_file)
+        .map_err(|e| format!("创建标准输出文件失败: {}", e))?;
+    
+    // 执行 Python 脚本，将 stdout 和 stderr 重定向到文件
     let mut child = Command::new(&python_path)
         .args(&args)
         .env("FIRERED_PROGRESS_FILE", progress_file.to_str().unwrap())
+        .stdout(std::process::Stdio::from(stdout_output))
+        .stderr(std::process::Stdio::from(stderr_output))
         .spawn()
         .map_err(|e| format!("执行校正脚本失败: {}", e))?;
     
@@ -1540,12 +1633,52 @@ pub async fn correct_with_firered(
         // 检查进程是否结束
         match child.try_wait() {
             Ok(Some(status)) => {
-                // 进程已结束
+                // 进程已结束，等待一小段时间确保文件写入完成
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                
                 let _ = std::fs::remove_file(&progress_file);
                 if !status.success() {
                     let _ = std::fs::remove_file(&output_path);
-                    return Err(format!("校正脚本执行失败 (退出码: {:?})", status.code()));
+                    
+                    // 读取 stderr 和 stdout 内容获取详细错误信息
+                    let stderr_content = std::fs::read_to_string(&stderr_file)
+                        .unwrap_or_default();
+                    let stdout_content = std::fs::read_to_string(&stdout_file)
+                        .unwrap_or_default();
+                    let _ = std::fs::remove_file(&stderr_file);
+                    let _ = std::fs::remove_file(&stdout_file);
+                    
+                    // 合并错误信息
+                    let combined_output = if !stderr_content.is_empty() && !stdout_content.is_empty() {
+                        format!("STDERR:\n{}\n\nSTDOUT:\n{}", stderr_content, stdout_content)
+                    } else if !stderr_content.is_empty() {
+                        stderr_content.clone()
+                    } else if !stdout_content.is_empty() {
+                        stdout_content.clone()
+                    } else {
+                        String::new()
+                    };
+                    
+                    // 记录详细错误到日志
+                    log::error!("[FireRed] 校正脚本执行失败 (退出码: {:?})", status.code());
+                    if !combined_output.is_empty() {
+                        log::error!("[FireRed] Python 错误详情:\n{}", combined_output);
+                    } else {
+                        log::error!("[FireRed] 未捕获到 Python 错误输出");
+                    }
+                    
+                    // 提取关键错误信息用于用户提示（优先使用 stderr）
+                    let error_source = if !stderr_content.is_empty() {
+                        &stderr_content
+                    } else {
+                        &stdout_content
+                    };
+                    let user_error = extract_user_friendly_error(error_source, status.code());
+                    return Err(user_error);
                 }
+                // 成功时也清理临时文件
+                let _ = std::fs::remove_file(&stderr_file);
+                let _ = std::fs::remove_file(&stdout_file);
                 break;
             }
             Ok(None) => {
@@ -1554,6 +1687,8 @@ pub async fn correct_with_firered(
             Err(e) => {
                 let _ = std::fs::remove_file(&progress_file);
                 let _ = std::fs::remove_file(&output_path);
+                let _ = std::fs::remove_file(&stderr_file);
+                let _ = std::fs::remove_file(&stdout_file);
                 return Err(format!("检查进程状态失败: {}", e));
             }
         }
@@ -1563,6 +1698,8 @@ pub async fn correct_with_firered(
             let _ = child.kill();
             let _ = std::fs::remove_file(&progress_file);
             let _ = std::fs::remove_file(&output_path);
+            let _ = std::fs::remove_file(&stderr_file);
+            let _ = std::fs::remove_file(&stdout_file);
             return Err("校正已取消".to_string());
         }
         
