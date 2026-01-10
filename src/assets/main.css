@@ -659,7 +659,13 @@ input, textarea {
   border-radius: 6px !important;
   font-size: 13px !important;
   padding: 6px 14px !important;
-  transition: all 0.2s !important;
+  transition: background-color 0.2s !important;
+  -webkit-font-smoothing: antialiased !important;
+  -moz-osx-font-smoothing: grayscale !important;
+  transform: translateZ(0) !important;
+  backface-visibility: hidden !important;
+  text-shadow: none !important;
+  font-weight: 500 !important;
 }
 
 .vosub-tour-popover .driver-popover-prev-btn {
