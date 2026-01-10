@@ -55,8 +55,8 @@ async function updateVersion() {
 
   await updateFile(
     'src/components/SettingsDialog.vue',
-    oldVer => `const appVersion = '${oldVer}'`,
-    newVer => `const appVersion = '${newVer}'`
+    oldVer => `const appVersion = ref('${oldVer}')`,
+    newVer => `const appVersion = ref('${newVer}')`
   )
 }
 
