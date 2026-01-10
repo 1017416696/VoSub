@@ -12,6 +12,8 @@ export {}
 declare module 'vue' {
   export interface GlobalComponents {
     AudioEmptyState: typeof import('./src/components/editor/AudioEmptyState.vue')['default']
+    ChristmasGreeting: typeof import('./src/components/ChristmasGreeting.vue')['default']
+    ChristmasSnow: typeof import('./src/components/ChristmasSnow.vue')['default']
     CorrectionCompareDialog: typeof import('./src/components/CorrectionCompareDialog.vue')['default']
     DictionaryPreviewDialog: typeof import('./src/components/DictionaryPreviewDialog.vue')['default']
     EditorSidebar: typeof import('./src/components/editor/EditorSidebar.vue')['default']
@@ -28,5 +30,6 @@ declare module 'vue' {
     TitleBar: typeof import('./src/components/TitleBar.vue')['default']
     UpdateDialog: typeof import('./src/components/UpdateDialog.vue')['default']
     WaveformViewer: typeof import('./src/components/WaveformViewer.vue')['default']
+    WelcomeGuide: typeof import('./src/components/WelcomeGuide.vue')['default']
   }
 }
