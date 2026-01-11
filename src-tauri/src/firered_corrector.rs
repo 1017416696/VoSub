@@ -1618,10 +1618,29 @@ pub async fn correct_with_firered(
     let stdout_output = std::fs::File::create(&stdout_file)
         .map_err(|e| format!("创建标准输出文件失败: {}", e))?;
     
+    // 构建 PATH 环境变量，确保 ffmpeg/ffprobe 可被找到
+    let path_env = {
+        let current_path = std::env::var("PATH").unwrap_or_default();
+        // macOS: 添加 Homebrew 路径 (Apple Silicon 和 Intel)
+        #[cfg(target_os = "macos")]
+        {
+            format!("/opt/homebrew/bin:/usr/local/bin:{}", current_path)
+        }
+        #[cfg(target_os = "windows")]
+        {
+            current_path
+        }
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+        {
+            format!("/usr/local/bin:{}", current_path)
+        }
+    };
+    
     // 执行 Python 脚本，将 stdout 和 stderr 重定向到文件
     let mut child = Command::new(&python_path)
         .args(&args)
         .env("FIRERED_PROGRESS_FILE", progress_file.to_str().unwrap())
+        .env("PATH", &path_env)
         .stdout(std::process::Stdio::from(stdout_output))
         .stderr(std::process::Stdio::from(stderr_output))
         .spawn()
