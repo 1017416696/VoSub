@@ -44,6 +44,116 @@ fn is_cancelled() -> bool {
     WHISPER_CANCELLED.load(Ordering::SeqCst)
 }
 
+/// 清理 ANSI 转义码
+fn strip_ansi_codes(text: &str) -> String {
+    let mut result = String::new();
+    let mut chars = text.chars().peekable();
+    
+    while let Some(ch) = chars.next() {
+        if ch == '\x1b' || ch == '\u{001b}' {
+            // 跳过 ANSI 转义序列
+            // 格式：\x1b[数字;数字m 或 \x1b(字母
+            if let Some('[') = chars.peek() {
+                chars.next(); // 跳过 '['
+                // 跳过数字、分号和字母，直到遇到字母（结束符）
+                while let Some(&next_ch) = chars.peek() {
+                    chars.next();
+                    if next_ch.is_alphabetic() {
+                        break;
+                    }
+                }
+                continue;
+            } else if let Some('(') = chars.peek() {
+                chars.next(); // 跳过 '('
+                // 跳过单个字母
+                if let Some(_) = chars.next() {
+                    continue;
+                }
+            }
+        }
+        result.push(ch);
+    }
+    
+    // 同时清理常见的 ANSI 转义码格式（如 [34m, [0m 等）
+    // 这些可能是从某些输出中直接包含的
+    result = result
+        .replace("\x1b[", "")
+        .replace("\u{001b}[", "")
+        .replace("[34m", "")
+        .replace("[0m", "")
+        .replace("[1m", "")
+        .replace("[32m", "")
+        .replace("[31m", "")
+        .replace("[33m", "");
+    
+    result
+}
+
+/// 格式化错误消息，提供友好的错误提示
+fn format_error_message(error: &str) -> String {
+    let cleaned = strip_ansi_codes(error);
+    let lower = cleaned.to_lowercase();
+    
+    // 网络连接错误
+    if lower.contains("connection reset") || lower.contains("errno 54") {
+        return "网络连接被中断，请检查网络连接后重试。如果问题持续，可能需要使用代理或VPN。".to_string();
+    }
+    if lower.contains("connection refused") || lower.contains("errno 61") {
+        return "无法连接到服务器，请检查网络连接。".to_string();
+    }
+    if lower.contains("timeout") || lower.contains("timed out") {
+        return "连接超时，请检查网络连接后重试。".to_string();
+    }
+    if lower.contains("dns") || lower.contains("resolve") {
+        return "无法解析服务器地址，请检查网络设置或DNS配置。".to_string();
+    }
+    if lower.contains("ssl") || lower.contains("certificate") {
+        return "安全连接失败，请检查系统时间或网络代理设置。".to_string();
+    }
+    
+    // 模型下载相关错误
+    if lower.contains("model") && (lower.contains("not found") || lower.contains("404")) {
+        return "模型文件不存在，请稍后重试或选择其他模型。".to_string();
+    }
+    if lower.contains("download") && lower.contains("failed") {
+        return "模型下载失败，请检查网络连接后重试。".to_string();
+    }
+    
+    // 如果错误信息包含进度条格式（如 0%|█|...），提取关键错误信息
+    if cleaned.contains("ERROR:") {
+        if let Some(start) = cleaned.find("ERROR:") {
+            let error_part = &cleaned[start + 6..];
+            // 移除进度条格式
+            let cleaned_error = error_part
+                .lines()
+                .filter(|line| !line.contains('%') && !line.contains("it/s") && !line.contains("█"))
+                .collect::<Vec<_>>()
+                .join(" ");
+            if !cleaned_error.trim().is_empty() {
+                return format!("{}", cleaned_error.trim());
+            }
+        }
+    }
+    
+    // 移除进度条格式的噪音
+    let cleaned = cleaned
+        .lines()
+        .filter(|line| {
+            !line.contains('%') && 
+            !line.contains("it/s") && 
+            !line.contains("█") &&
+            !line.trim().is_empty()
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    
+    if cleaned.trim().is_empty() {
+        "未知错误，请查看日志获取详细信息。".to_string()
+    } else {
+        cleaned.trim().to_string()
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WhisperProgress {
     pub progress: f32,
@@ -1093,7 +1203,12 @@ pub async fn transcribe_with_whisper(
     
     if !status.success() {
         let _ = std::fs::remove_file(&output_path);
-        return Err(format!("转录失败: {}", stderr_output));
+        let error_msg = if stderr_output.trim().is_empty() {
+            "转录失败：未知错误".to_string()
+        } else {
+            format_error_message(&stderr_output)
+        };
+        return Err(format!("转录失败: {}", error_msg));
     }
     
     // 读取结果
@@ -1468,7 +1583,12 @@ pub async fn download_whisper_model(model_name: &str, window: Window) -> Result<
     let status = child.wait().map_err(|e| format!("等待下载完成失败: {}", e))?;
     
     if !status.success() {
-        return Err(format!("下载模型失败: {}", stderr_output));
+        let error_msg = if stderr_output.trim().is_empty() {
+            "下载模型失败：未知错误".to_string()
+        } else {
+            format_error_message(&stderr_output)
+        };
+        return Err(format!("下载模型失败: {}", error_msg));
     }
     
     // 发送完成进度

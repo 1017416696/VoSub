@@ -351,6 +351,47 @@ const onTitlebarDoubleClick = async () => {
   else await window.maximize()
 }
 
+// 格式化转录错误消息
+const formatTranscriptionError = (error: string): string => {
+  const lowerError = error.toLowerCase()
+  
+  // 网络连接错误
+  if (lowerError.includes('connection reset') || lowerError.includes('errno 54')) {
+    return '网络连接被中断，请检查网络连接后重试。如果问题持续，可能需要使用代理或VPN。'
+  }
+  if (lowerError.includes('connection refused') || lowerError.includes('errno 61')) {
+    return '无法连接到服务器，请检查网络连接。'
+  }
+  if (lowerError.includes('timeout') || lowerError.includes('timed out')) {
+    return '连接超时，请检查网络连接后重试。'
+  }
+  if (lowerError.includes('dns') || lowerError.includes('resolve')) {
+    return '无法解析服务器地址，请检查网络设置或DNS配置。'
+  }
+  if (lowerError.includes('ssl') || lowerError.includes('certificate')) {
+    return '安全连接失败，请检查系统时间或网络代理设置。'
+  }
+  
+  // 模型下载相关错误
+  if (lowerError.includes('model') && (lowerError.includes('not found') || lowerError.includes('404'))) {
+    return '模型文件不存在，请稍后重试或选择其他模型。'
+  }
+  if (lowerError.includes('download') && lowerError.includes('failed')) {
+    return '模型下载失败，请检查网络连接后重试。'
+  }
+  
+  // 如果包含"转录失败:"前缀，提取后面的内容（避免重复）
+  if (error.includes('转录失败:')) {
+    const parts = error.split('转录失败:')
+    if (parts.length > 1) {
+      return parts.slice(1).join('转录失败:').trim()
+    }
+  }
+  
+  // 返回原始错误信息（Rust后端已经清理过ANSI转义码和进度条格式）
+  return error.trim() || '未知错误，请查看日志获取详细信息。'
+}
+
 const startTranscription = async () => {
   try {
     // 先选择音频文件
@@ -372,7 +413,10 @@ const startTranscription = async () => {
     if (isCancelled.value) return
     const errorMsg = error instanceof Error ? error.message : String(error)
     if (errorMsg.includes('取消') || errorMsg.includes('cancel')) return
-    await ElMessageBox.alert(`转录失败：${errorMsg}`, '转录失败', { confirmButtonText: '确定', type: 'error' })
+    
+    // 格式化错误消息，清理ANSI转义码和进度条格式
+    const formattedError = formatTranscriptionError(errorMsg)
+    await ElMessageBox.alert(`转录失败：${formattedError}`, '转录失败', { confirmButtonText: '确定', type: 'error' })
   }
 }
 

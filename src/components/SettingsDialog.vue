@@ -846,6 +846,13 @@ const switchFireredVersion = async (useGpu: boolean) => {
 const formatDownloadError = (error: string): string => {
   const lowerError = error.toLowerCase()
   
+  // 网络连接错误
+  if (lowerError.includes('connection reset') || lowerError.includes('errno 54')) {
+    return '网络连接被中断，请检查网络连接后重试。如果问题持续，可能需要使用代理或VPN。'
+  }
+  if (lowerError.includes('connection refused') || lowerError.includes('errno 61')) {
+    return '无法连接到服务器，请检查网络连接。'
+  }
   if (lowerError.includes('error sending request') || lowerError.includes('connection')) {
     return '网络连接失败，请检查网络后重试'
   }
@@ -871,8 +878,8 @@ const formatDownloadError = (error: string): string => {
     return '下载不完整，请点击"继续下载"重试'
   }
   
-  // 如果是其他错误，返回简化的提示
-  return '下载失败，请检查网络后重试'
+  // 如果是其他错误，返回原始错误信息（Rust后端已经清理过ANSI转义码）
+  return error.trim() || '下载失败，请检查网络后重试'
 }
 
 // 下载 Whisper 模型
