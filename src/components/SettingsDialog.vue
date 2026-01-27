@@ -1122,7 +1122,7 @@ const splitShortcut = (key: string): string[] => {
 }
 
 // 应用版本
-const appVersion = ref('1.0.7')
+const appVersion = ref('1.0.8')
 
 // 检查更新相关
 const isCheckingUpdate = ref(false)
